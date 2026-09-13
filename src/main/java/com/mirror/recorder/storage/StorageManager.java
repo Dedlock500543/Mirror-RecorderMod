@@ -17,12 +17,13 @@ public class StorageManager{
     private final TrashStore trashStore;
     private final File saveDir,exportDir;
     private final Map<Integer,SlotSummary> summaries=new HashMap<Integer,SlotSummary>();
+    private final RecordingSaveWorker saver;
     public StorageManager(File minecraftDir){
         saveDir=new File(minecraftDir,"mirror_recorder");exportDir=new File(saveDir,"exports");File trashDir=new File(saveDir,"trash");
         if(!saveDir.exists()&&!saveDir.mkdirs())LOG.error("Failed to create save directory");
         if(!exportDir.exists()&&!exportDir.mkdirs())LOG.error("Failed to create export directory");
         if(!trashDir.exists()&&!trashDir.mkdirs())LOG.error("Failed to create trash directory");
-        fileStore=new RecordingFileStore(saveDir);trashStore=new TrashStore(saveDir,trashDir);}
+        fileStore=new RecordingFileStore(saveDir);trashStore=new TrashStore(saveDir,trashDir);saver=new RecordingSaveWorker(this);}
     private boolean validSlot(int s){return s>=1&&s<=100;}
     // === Запись и чтение ===
     public boolean saveRecording(int slot,List<Frame> frames,NBTTagCompound settings){
@@ -41,6 +42,18 @@ public class StorageManager{
         int skipped=frames.size()-root.getTagList("Frames",Constants.NBT.TAG_COMPOUND).tagCount();
         if(skipped>0)LOG.warn("Slot {}: saved {}/{} frames ({} skipped)",slot,root.getTagList("Frames",Constants.NBT.TAG_COMPOUND).tagCount(),frames.size(),skipped);
         boolean ok=fileStore.writeAtomically(slot,root);invalidateSummary(slot);return ok;}
+    // === Фоновая запись ===
+    /** Поставить слот на фоновое сохранение: главный поток отдаёт готовый снимок и идёт дальше, результат приходит в SaveCallback. */
+    public void queueRecordingSave(int slot,List<Frame> frames,NBTTagCompound settings){
+        if(!validSlot(slot)||frames==null||frames.isEmpty()||frames.size()>MAX_FRAMES){MirrorDebug.log("STORAGE","background save rejected for slot "+slot);return;}
+        saver.queue(slot,frames,settings);}
+    public void setSaveCallback(RecordingSaveWorker.SaveCallback cb){saver.setCallback(cb);}
+    /** Тишина по слоту: нет ни заявки в очереди, ни активной фоновой записи. False = таймаут, операцию продолжать нельзя. */
+    public boolean awaitSlotQuiescent(int slot){return saver.awaitQuiescent(slot,RecordingSaveWorker.QUIESCE_TIMEOUT_MS);}
+    /** Тихо ли по слоту прямо сейчас (для снятия флага unsaved только по последнему снимку). */
+    public boolean isSlotSettled(int slot){return saver.isSettled(slot);}
+    /** Для хука завершения: дождаться фоновый поток и досохранить остатки синхронно. */
+    public void shutdownFlush(){saver.shutdownFlush();}
     /** Порядок: целый .nbt → целый .bak → частично уцелевшие кадры. */
     public List<Frame> loadRecording(int slot){
         if(!validSlot(slot))return new ArrayList<Frame>();
@@ -54,13 +67,14 @@ public class StorageManager{
     // === Удаление и корзина ===
     public boolean deleteRecording(int slot){
         if(!validSlot(slot))return false;
+        if(!awaitSlotQuiescent(slot)){LOG.error("Refusing to delete slot {}: background save did not finish in time",Integer.valueOf(slot));return false;}
         NBTTagCompound best=fileStore.bestRootForBackup(slot,codec);
         if(best!=null&&!trashStore.archiveToTrash(slot,best)){LOG.error("Refusing to delete slot {}: trash copy failed",slot);return false;}
         File t=fileStore.tmpFile(slot),b=fileStore.bakFile(slot),n=fileStore.nbtFile(slot);
         if(n.exists()&&!n.delete())return false;boolean ok=!t.exists()||t.delete();if(b.exists()&&!b.delete())ok=false;
         invalidateSummary(slot);return ok;}
-    public boolean moveToTrash(int slot){NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;boolean ok=trashStore.moveToTrash(slot,r);if(ok)invalidateSummary(slot);return ok;}
-    public boolean restoreTrash(String name,int slot){if(!validSlot(slot)||peekFrameCount(slot)>0)return false;boolean ok=trashStore.restoreTrash(name,slot,codec,fileStore);if(ok){invalidateSummary(slot);}return ok;}
+    public boolean moveToTrash(int slot){if(!awaitSlotQuiescent(slot)){LOG.error("Refusing to trash slot {}: background save did not finish in time",Integer.valueOf(slot));return false;}NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;boolean ok=trashStore.moveToTrash(slot,r);if(ok)invalidateSummary(slot);return ok;}
+    public boolean restoreTrash(String name,int slot){if(!validSlot(slot))return false;if(!awaitSlotQuiescent(slot))return false;if(peekFrameCount(slot)>0)return false;boolean ok=trashStore.restoreTrash(name,slot,codec,fileStore);if(ok){invalidateSummary(slot);}return ok;}
     public boolean deleteTrash(String name){return trashStore.deleteTrash(name);}
     public boolean clearTrash(){return trashStore.clearTrash();}
     public String latestTrashFile(){return trashStore.latestTrashFile();}
@@ -75,11 +89,13 @@ public class StorageManager{
     public String loadSlotName(int s){return summary(s).name;}
     public String loadSlotDesc(int s){return summary(s).desc;}
     public NBTTagCompound loadSlotSettings(int slot){NBTTagCompound r=readStructuralRoot(slot);return r!=null&&r.hasKey("SlotSettings",Constants.NBT.TAG_COMPOUND)?r.getCompoundTag("SlotSettings"):null;}
-    public boolean saveSlotSettings(int slot,NBTTagCompound settings){if(settings==null)return false;NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;r.setTag("SlotSettings",settings);invalidateSummary(slot);return fileStore.writeAtomically(slot,r);}
-    public boolean saveSlotMetadata(int slot,String name,String desc){NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;r.setString("SlotName",codec.clean(name,40));r.setString("SlotDesc",codec.clean(desc,120));invalidateSummary(slot);return fileStore.writeAtomically(slot,r);}
+    public boolean saveSlotSettings(int slot,NBTTagCompound settings){if(settings==null||!awaitSlotQuiescent(slot))return false;NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;r.setTag("SlotSettings",settings);invalidateSummary(slot);return fileStore.writeAtomically(slot,r);}
+    public boolean saveSlotMetadata(int slot,String name,String desc){if(!awaitSlotQuiescent(slot))return false;NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;r.setString("SlotName",codec.clean(name,40));r.setString("SlotDesc",codec.clean(desc,120));invalidateSummary(slot);return fileStore.writeAtomically(slot,r);}
     // === Дублирование ===
     public boolean duplicateRecording(int source,int target,String emptyLabel,String copySuffix){
-        if(!validSlot(source)||!validSlot(target)||source==target||peekFrameCount(target)>0)return false;
+        if(!validSlot(source)||!validSlot(target)||source==target)return false;
+        if(!awaitSlotQuiescent(source)||!awaitSlotQuiescent(target))return false;
+        if(peekFrameCount(target)>0)return false;
         NBTTagCompound r=readStructuralRoot(source);if(r==null)return false;
         String sourceName=codec.clean(r.getString("SlotName"),40);
         if(sourceName.isEmpty()){r.setString("SlotName",codec.clean(emptyLabel,40));boolean ok=fileStore.writeAtomically(target,r);if(ok)invalidateSummary(target);return ok;}
@@ -89,6 +105,7 @@ public class StorageManager{
         r.setString("SlotName",base+suffix);boolean ok=fileStore.writeAtomically(target,r);if(ok)invalidateSummary(target);return ok;}
     // === Экспорт и импорт ===
     public String exportRecording(int slot){
+        if(!awaitSlotQuiescent(slot))return null;
         NBTTagCompound r=readStructuralRoot(slot);if(r==null)return null;
         String base=codec.safeName(codec.clean(r.getString("SlotName"),40));if(base.isEmpty())base="slot_"+slot;
         String stamp=new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.ROOT).format(new Date());
@@ -102,7 +119,9 @@ public class StorageManager{
         Collections.sort(all,new Comparator<File>(){public int compare(File a,File b){return Long.compare(b.lastModified(),a.lastModified());}});
         List<String> names=new ArrayList<String>();for(File f:all)if(f.isFile())names.add(f.getName());return names;}
     public boolean importRecording(int slot,String fileName){
-        if(!validSlot(slot)||peekFrameCount(slot)>0||fileName==null)return false;
+        if(!validSlot(slot)||fileName==null)return false;
+        if(!awaitSlotQuiescent(slot))return false;
+        if(peekFrameCount(slot)>0)return false;
         File in=new File(exportDir,new File(fileName).getName());NBTTagCompound r=fileStore.tryRead(in);
         if(!codec.validRoot(r))return false;
         r.setInteger("Version",Math.max(1,Math.min(FORMAT_VERSION,r.hasKey("Version")?r.getInteger("Version"):2)));
@@ -122,10 +141,11 @@ public class StorageManager{
         if(!validSlot(slot))return SlotSummary.EMPTY;
         File n=fileStore.nbtFile(slot),b=fileStore.bakFile(slot);
         long ns=n.isFile()?n.lastModified():0L,nz=n.isFile()?n.length():0L,bs=b.isFile()?b.lastModified():0L,bz=b.isFile()?b.length():0L;
-        SlotSummary old=summaries.get(slot);if(old!=null&&old.matches(ns,nz,bs,bz))return old;
+        // Карту читают и главный поток, и фоновое сохранение; тяжёлое чтение файла — вне блокировки.
+        synchronized(summaries){SlotSummary old=summaries.get(slot);if(old!=null&&old.matches(ns,nz,bs,bz))return old;}
         NBTTagCompound root=readStructuralRoot(slot);
         SlotSummary fresh=root==null?new SlotSummary(ns,nz,bs,bz,0,"","",false):new SlotSummary(ns,nz,bs,bz,root.getTagList("Frames",Constants.NBT.TAG_COMPOUND).tagCount(),codec.clean(root.getString("SlotName"),40),codec.clean(root.getString("SlotDesc"),120),root.getBoolean("Imported"));
-        summaries.put(slot,fresh);return fresh;}
-    private void invalidateSummary(int slot){summaries.remove(slot);}
+        synchronized(summaries){summaries.put(slot,fresh);}return fresh;}
+    private void invalidateSummary(int slot){synchronized(summaries){summaries.remove(slot);}}
     private static final class SlotSummary{static final SlotSummary EMPTY=new SlotSummary(0L,0L,0L,0L,0,"","",false);final long ns,nz,bs,bz;final int count;final String name,desc;final boolean imported;SlotSummary(long ns,long nz,long bs,long bz,int count,String name,String desc,boolean imported){this.ns=ns;this.nz=nz;this.bs=bs;this.bz=bz;this.count=count;this.name=name;this.desc=desc;this.imported=imported;}boolean matches(long nst,long nsz,long bst,long bsz){return ns==nst&&nz==nsz&&bs==bst&&bz==bsz;}}
 }
