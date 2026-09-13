@@ -54,7 +54,13 @@ public class RecordingHandler {
     private final java.util.ArrayDeque<String> chatQueue=new java.util.ArrayDeque<String>();
     /** Записанные сообщения отправляются по одному: залп в один тик ведёт к кику за флуд. */
     private long lastChatSentAt=0L;
-    private int appliedFrame=-1,interactionFrame=-1;private boolean heldAttack=false,heldUse=false,recRotInit=false;private int lastMask=0;private float lastRecYaw=0f,lastRecPitch=0f;private long interactionRun=-1L;private float adjustedForward,adjustedStrafe;private final PlaybackTrajectory trajectory;private boolean clickMethodsResolved=false,guiClickMethodResolved=false,clickMethodWarning=false;private Method clickMouseMethod,rightClickMouseMethod,guiMouseClickedMethod;private Field leftClickCounterField;private Method sendClickBlockMethod;private Field rightClickDelayField;private volatile boolean pendingGuiClick=false,pendingGuiCenter=false;private volatile int pendingGuiCX=0,pendingGuiCY=0;private boolean importedChatWarned=false;private volatile float pendingGuiX=0f,pendingGuiY=0f;private volatile String pendingGuiScreen=null;private String lastNotice="";private long lastNoticeAt=0L;private Method guiMouseReleasedMethod,guiKeyTypedMethod;private Field guiButtonListField;private boolean guiButtonListResolved=false;private net.minecraft.client.gui.GuiButton replaySlider=null;private GuiScreen replaySliderScreen=null;private int lastHotbar=-1;private final java.util.ArrayDeque<Object> guiQueue=new java.util.ArrayDeque<Object>();private boolean noticeGuiDrop=false;private int autoCheckpointTicks=0;private boolean sprintRefused=false;private boolean speedNoticeShown=false;private boolean backgroundPolicyHeld=false,savedPauseOnLostFocus=true;private int useHoldFallbackDelay=0;private boolean wantSprint=false;private boolean sprintAssist=false;private boolean useTimerAlign=false;private long maskRun=-1L;private volatile boolean pendingGuiShift=false;private int screenMismatchTicks=0;private static final int SCREEN_CLOSE_DELAY=10;private boolean quickMoveResolved=false;private Method handleMouseClickMethod,slotAtPositionMethod;private final Frame[] lookAhead=new Frame[100];private static final int GA_TYPE=0,GA_DROP=1,GA_PICK=2,GA_CLOSE=3,GA_SWAP=4,GA_DRAG=5,GA_DRAG_END=6,GUI_FLAG_TIMED=4,GUI_KEY_LIMIT=64;private final java.util.List<int[]> pendingGuiKeys=new java.util.ArrayList<int[]>();private volatile String pendingGuiKeyScreen=null;private volatile int pendingGuiButton=0;private long recordTickStartNs=0L;private final java.util.Map<String,Field[]> textFieldCache=new java.util.HashMap<String,Field[]>();private int worldSuspendTicks=0;private static final int WORLD_SUSPEND_LIMIT=600;private volatile boolean worldResetPending=false;
+    private int appliedFrame=-1,interactionFrame=-1;private boolean heldAttack=false,heldUse=false,recRotInit=false;private int lastMask=0;private float lastRecYaw=0f,lastRecPitch=0f;private long interactionRun=-1L;private float adjustedForward,adjustedStrafe;private final PlaybackTrajectory trajectory;private boolean clickMethodsResolved=false,guiClickMethodResolved=false,clickMethodWarning=false;private Method clickMouseMethod,rightClickMouseMethod,guiMouseClickedMethod;private Field leftClickCounterField;private Method sendClickBlockMethod;private Field rightClickDelayField;private volatile boolean pendingGuiClick=false,pendingGuiCenter=false;private volatile int pendingGuiCX=0,pendingGuiCY=0;private boolean importedChatWarned=false;private volatile float pendingGuiX=0f,pendingGuiY=0f;private volatile String pendingGuiScreen=null;private String lastNotice="";private long lastNoticeAt=0L;private Method guiMouseReleasedMethod,guiKeyTypedMethod;private Field guiButtonListField;private boolean guiButtonListResolved=false;private net.minecraft.client.gui.GuiButton replaySlider=null;private GuiScreen replaySliderScreen=null;private int lastHotbar=-1;private final java.util.ArrayDeque<Object> guiQueue=new java.util.ArrayDeque<Object>();private boolean noticeGuiDrop=false;private int autoCheckpointTicks=0;private boolean sprintRefused=false;private boolean speedNoticeShown=false;private boolean backgroundPolicyHeld=false,savedPauseOnLostFocus=true;private int useHoldFallbackDelay=0;private boolean wantSprint=false;private boolean sprintAssist=false;private boolean useTimerAlign=false;private long maskRun=-1L;private volatile boolean pendingGuiShift=false;private int screenMismatchTicks=0;private static final int SCREEN_CLOSE_DELAY=10;private boolean quickMoveResolved=false;private Method handleMouseClickMethod,slotAtPositionMethod;private final Frame[] lookAhead=new Frame[100];private static final int GA_TYPE=0,GA_DROP=1,GA_PICK=2,GA_CLOSE=3,GA_SWAP=4,GA_DRAG=5,GA_DRAG_END=6,GA_CMOVE=7,GA_CRELEASE=8,GUI_FLAG_TIMED=4,GUI_KEY_LIMIT=64;private final java.util.List<int[]> pendingGuiKeys=new java.util.ArrayList<int[]>();private volatile String pendingGuiKeyScreen=null;private volatile int pendingGuiButton=0;private long recordTickStartNs=0L;private final java.util.Map<String,Field[]> textFieldCache=new java.util.HashMap<String,Field[]>();private int worldSuspendTicks=0;private static final int WORLD_SUSPEND_LIMIT=600;private volatile boolean worldResetPending=false;
+    /** Отложенное нажатие в контейнере: отпуск приходит отдельным событием (GA_CRELEASE) или следующим нажатием. */
+    private GuiScreen defPressScreen=null;private int defPressX=0,defPressY=0,defPressButton=0;private boolean defPressActive=false;private long defPressStartNs=0L;
+    private Method guiMouseClickMoveMethod=null;
+    /** Записываемый драг в контейнере: кнопка, экран, троттлинг движений (события мыши и тики идут в одном потоке). */
+    private int recDragButton=-1,recDragLastX=0,recDragLastY=0;private String recDragScreen=null;private long recDragLastMoveNs=0L;
+    private boolean pendingDropAll=false;
     public RecordingHandler(RecorderManager manager,RecorderConfig config,PlaybackTrajectory trajectory){this.manager=manager;this.config=config;this.trajectory=trajectory;}
     /** Аварийная остановка: гасит запись, повтор, возврат и все удерживаемые клавиши. */
     private void emergencyStop(String reason){
@@ -285,21 +291,21 @@ public class RecordingHandler {
         updateBackgroundPolicy();focusGuard();if(event.phase==TickEvent.Phase.START){recordTickStartNs=manager.isRecording()?System.nanoTime():0L;tickChatTyping(true);}ensureIngameGrab();
         if(event.phase==TickEvent.Phase.START){if(manager.isPlaying()&&!mc.isGamePaused()){popInterpolatedLook();long run=manager.getPlaybackRunId();int index=manager.getCurrentFrameIndex();if(rotRun==run&&rotFrame==index){lookDYaw=0f;lookDPitch=0f;}applyPlaybackRotation();handlePlaybackInteractions();}return;}
         // Мира нет: либо переход между мирами (ждём), либо выход в меню/дисконнект (30 с без мира — стоп с сохранением).
-        if(mc.world==null){if(manager.isBusy()&&++worldSuspendTicks>=WORLD_SUSPEND_LIMIT){worldSuspendTicks=0;boolean wasRec=manager.isRecording();manager.stopAll();forceResetKeys();sendMsg(wasRec?L("§eЗапись остановлена и сохранена: выход из мира.","§eRecording stopped and saved: left the world.","§eЗапис зупинено і збережено: вихід зі світу.","§eAufnahme gestoppt und gespeichert: Welt verlassen.","§eNagrywanie zatrzymane i zapisane: opuszczenie świata."):L("§eПовтор остановлен: выход из мира.","§ePlayback stopped: left the world.","§eВідтворення зупинено: вихід зі світу.","§eWiedergabe gestoppt: Welt verlassen.","§eOdtwarzanie zatrzymane: opuszczenie świata."));}return;}
+        if(mc.world==null){if(manager.isBusy()&&++worldSuspendTicks>=WORLD_SUSPEND_LIMIT){worldSuspendTicks=0;boolean wasRec=manager.isRecording();manager.stopAll();forceResetKeys();sendMsg(wasRec?L("§eЗапись остановлена: выход из мира.","§eRecording stopped: left the world.","§eЗапис зупинено: вихід зі світу.","§eAufnahme gestoppt: Welt verlassen.","§eNagrywanie zatrzymane: opuszczenie świata."):L("§eПовтор остановлен: выход из мира.","§ePlayback stopped: left the world.","§eВідтворення зупинено: вихід зі світу.","§eWiedergabe gestoppt: Welt verlassen.","§eOdtwarzanie zatrzymane: opuszczenie świata."));}return;}
         if(worldSuspendTicks>0)worldSuspendTicks=0;
         EntityPlayerSP player=mc.player;if(player==null||mc.world==null)return;if(!manager.isRecording())pendingChatMessage=null;
         int failedSlot=manager.consumeUnsavedWarningSlot();if(failedSlot>0)SoundFx.error();
         if(failedSlot>0)sendMsg(L("\u00a7c\u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f: \u0441\u043b\u043e\u0442 ","§cSave error: slot ","§cПомилка збереження: слот ","§cSpeicherfehler: Slot ","§cBłąd zapisu: slot ")+failedSlot+L(" \u043e\u0441\u0442\u0430\u043b\u0441\u044f \u0442\u043e\u043b\u044c\u043a\u043e \u0432 \u043f\u0430\u043c\u044f\u0442\u0438. \u041d\u0435 \u0437\u0430\u043a\u0440\u044b\u0432\u0430\u0439\u0442\u0435 \u0438\u0433\u0440\u0443."," is kept only in memory. Do not close the game."," залишився лише в пам'яті. Не закривайте гру."," ist nur noch im Speicher. Schließe das Spiel nicht."," pozostał tylko w pamięci. Nie zamykaj gry."));
         boolean nowRec=manager.isRecording(),nowPlay=manager.isPlaying();
         int limitSlot=manager.consumeLimitReachedSlot();
-        if(limitSlot>0)sendMsg(L("§eЗапись остановлена: достигнут лимит ","§eRecording stopped: the frame limit of ","§eЗапис зупинено: досягнуто ліміт ","§eAufnahme gestoppt: das Limit von ","§eNagranie zatrzymane: osiągnięto limit ")+com.mirror.recorder.storage.StorageManager.MAX_FRAMES+L(" кадров (1 час). Слот сохранён."," frames (1 hour) was reached. The slot is saved."," кадрів (1 годину). Слот збережено."," Frames (1 Stunde) wurde erreicht. Der Slot ist gespeichert."," klatek (1 godzina) został osiągnięty. Slot został zapisany."));
+        if(limitSlot>0)sendMsg(L("§eЗапись остановлена: достигнут лимит ","§eRecording stopped: the frame limit of ","§eЗапис зупинено: досягнуто ліміт ","§eAufnahme gestoppt: das Limit von ","§eNagranie zatrzymane: osiągnięto limit ")+com.mirror.recorder.storage.StorageManager.MAX_FRAMES+L(" кадров (1 час). Слот сохраняется в фоне."," frames (1 hour) was reached. The slot is saving in the background."," кадрів (1 годину). Слот зберігається у фоні."," Frames (1 Stunde) wurde erreicht. Der Slot wird im Hintergrund gespeichert."," klatek (1 godzina) został osiągnięty. Slot zapisuje się w tle."));
         if(nowRec&&!sndRec)SoundFx.recordStart();
         if(!nowRec&&sndRec)SoundFx.recordStop();
         if(nowPlay&&!sndPlay){SoundFx.playStart();sndCycle=manager.getPlaybackCycle();}
         else if(nowPlay){int cyc=manager.getPlaybackCycle();if(cyc>sndCycle){sndCycle=cyc;SoundFx.cycle();}}
         sndRec=nowRec;sndPlay=nowPlay;
         if(nowRec||nowPlay||manager.hasPendingAction()){String threat=guard.check(player,config);if(threat!=null){emergencyStop(threat);return;}}else guard.standby(player);
-        if((manager.isPlaying()||manager.isRecording()||manager.hasPendingAction())&&(player.isDead||player.getHealth()<=0f)){boolean wasRec=manager.isRecording();manager.stopAll();forceResetKeys();sendMsg(wasRec?L("§eЗапись остановлена и сохранена: игрок погиб.","§eRecording stopped and saved: the player died.","§eЗапис зупинено і збережено: гравець заги��ув.","§eAufnahme gestoppt und gespeichert: Der Spieler ist gestorben.","§eNagrywanie zatrzymane i zapisane: gracz zginął."):L("§eПовтор остановлен: игрок погиб.","§ePlayback stopped: the player died.","§eВідтворення зупинено: гравець загинув.","§eWiedergabe gestoppt: Der Spieler ist gestorben.","§eOdtwarzanie zatrzymane: gracz zginął."));return;}
+        if((manager.isPlaying()||manager.isRecording()||manager.hasPendingAction())&&(player.isDead||player.getHealth()<=0f)){boolean wasRec=manager.isRecording();manager.stopAll();forceResetKeys();sendMsg(wasRec?L("§eЗапись остановлена: игрок погиб.","§eRecording stopped: the player died.","§eЗапис зупинено: гравець загинув.","§eAufnahme gestoppt: Der Spieler ist gestorben.","§eNagrywanie zatrzymane: gracz zginął."):L("§eПовтор остановлен: игрок погиб.","§ePlayback stopped: the player died.","§eВідтворення зупинено: гравець загинув.","§eWiedergabe gestoppt: Der Spieler ist gestorben.","§eOdtwarzanie zatrzymane: gracz zginął."));return;}
         if(manager.hasPendingAction()){
             int prev=manager.getDelaySecondsRemaining();int sec=manager.tickDelay();
             if(sec>0&&sec!=prev){sendMsg("\u00a7e"+sec+"...");SoundFx.countdown(sec);}else if(sec==0)sendMsg(L("\u00a7a\u0421\u0442\u0430\u0440\u0442!","§aStart!","§aСтарт!","§aStart!","§aStart!"));return;
@@ -332,6 +338,7 @@ public class RecordingHandler {
             replayFrameEvents(frame,true,interact);
         }
         if(interact){processGuiQueue();closeUnexpectedScreen(frame);}
+        if(defPressActive&&(mc.currentScreen==null||mc.currentScreen!=defPressScreen)){defPressActive=false;defPressScreen=null;}
     }
     /** Один кадр записи: сначала дискретные события, затем клики и чат. При ускорении пропущенные кадры проходят тем же путём, поэтому события не теряются. */
     private void replayFrameEvents(Frame frame,boolean current,boolean interact){
@@ -478,6 +485,7 @@ public class RecordingHandler {
         try{for(Field f:GuiScreen.class.getDeclaredFields())if(java.util.List.class.isAssignableFrom(f.getType())){f.setAccessible(true);Object v=f.get(screen);if(v instanceof java.util.List){for(Object o:(java.util.List<?>)v)if(o instanceof net.minecraft.client.gui.GuiButton){guiButtonListField=f;return;}}}}catch(Exception e){}
     }
     private boolean sliderButton(net.minecraft.client.gui.GuiButton b){
+        if(b==null||b.getClass()==net.minecraft.client.gui.GuiButton.class)return false;
         if(b instanceof net.minecraft.client.gui.GuiOptionSlider)return true;
         for(Method m:b.getClass().getDeclaredMethods()){Class<?>[] a=m.getParameterTypes();String n=m.getName();if(a.length==3&&a[0]==Minecraft.class&&a[1]==Integer.TYPE&&a[2]==Integer.TYPE&&(n.equals("mouseDragged")||n.equals("func_146119_b")))return true;}
         return false;
@@ -503,13 +511,57 @@ public class RecordingHandler {
         else{x=MathHelper.clamp((int)(c.x*Math.max(1,screen.width)),0,Math.max(0,screen.width-1));y=MathHelper.clamp((int)(c.y*Math.max(1,screen.height))-1,0,Math.max(0,screen.height-1));}
         pointerSnap(x,y);
         if(c.button==0){replaySlider=findReplaySlider(screen,x,y);replaySliderScreen=replaySlider==null?null:screen;}
+        flushDeferredPress();
         if(c.button==2&&deliverClone(screen,x,y))return;
         if(c.shift&&deliverQuickMove(screen,x,y,c.button))return;
         try{guiMouseClickedMethod.invoke(screen,Integer.valueOf(x),Integer.valueOf(y),Integer.valueOf(c.button));}
         catch(Exception e){warnClickFailure("Recorded GUI click failed",e);return;}
         deliverListClick(screen,x,y,c.button);
+        if(shouldDeferContainerRelease(screen,x,y,c)){armDeferredPress(screen,x,y,c.button);return;}
         if(guiMouseReleasedMethod==null)return;
         try{guiMouseReleasedMethod.invoke(screen,Integer.valueOf(x),Integer.valueOf(y),Integer.valueOf(c.button));}
+        catch(Exception e){warnClickFailure("Recorded GUI release failed",e);}
+        if(mc.currentScreen!=screen)clearLeftClickBlock();
+    }
+    /** Нажатие по слоту: отпуск откладываем — дальше может идти драг. Старые записи без GA_CRELEASE отпускаются следующим нажатием. */
+    private boolean shouldDeferContainerRelease(GuiScreen screen,int x,int y,GuiClickEvent c){
+        if(!(screen instanceof net.minecraft.client.gui.inventory.GuiContainer))return false;
+        if(c==null||c.shift||(c.button!=0&&c.button!=1))return false;
+        if(!quickMoveResolved)resolveQuickMove();
+        if(slotAtPositionMethod==null)return false;
+        try{Object slot=slotAtPositionMethod.invoke(screen,Integer.valueOf(x),Integer.valueOf(y));return slot instanceof net.minecraft.inventory.Slot;}
+        catch(Exception e){return false;}
+    }
+    private void armDeferredPress(GuiScreen screen,int x,int y,int button){
+        defPressScreen=screen;defPressX=x;defPressY=y;defPressButton=button;defPressActive=true;defPressStartNs=System.nanoTime();
+    }
+    /** Отпустить отложенное нажатие в его же окне; чужое окно не трогаем — нажатие просто отменяется. */
+    private void flushDeferredPress(){
+        GuiScreen s=defPressScreen;defPressActive=false;defPressScreen=null;
+        if(s==null||mc.currentScreen!=s||guiMouseReleasedMethod==null)return;
+        try{guiMouseReleasedMethod.invoke(s,Integer.valueOf(defPressX),Integer.valueOf(defPressY),Integer.valueOf(defPressButton));}
+        catch(Exception e){warnClickFailure("Recorded GUI release failed",e);}
+        if(mc.currentScreen!=s)clearLeftClickBlock();
+    }
+    private void deliverContainerMove(GuiScreen screen,int cx,int cy,int button){
+        if(!(screen instanceof net.minecraft.client.gui.inventory.GuiContainer))return;
+        if(!guiClickMethodResolved){resolveGuiClickMethod();MirrorDebug.probe("GuiScreen.mouseClickMove",guiMouseClickMoveMethod!=null,"container drag replay");}
+        if(guiMouseClickMoveMethod==null)return;
+        int x=MathHelper.clamp(screen.width/2+cx,0,Math.max(0,screen.width-1)),y=MathHelper.clamp(screen.height/2+cy,0,Math.max(0,screen.height-1));
+        pointerSnap(x,y);
+        long since=!defPressActive||defPressStartNs<=0L?0L:Math.max(0L,(System.nanoTime()-defPressStartNs)/1000000L);
+        try{guiMouseClickMoveMethod.invoke(screen,Integer.valueOf(x),Integer.valueOf(y),Integer.valueOf(button),Long.valueOf(since));}
+        catch(Exception e){warnClickFailure("Recorded container drag failed",e);}
+    }
+    private void deliverContainerRelease(GuiScreen screen,int cx,int cy,int button){
+        // Сам отпуск и закрывает отложенное нажатие: двойного релиза не будет.
+        defPressActive=false;defPressScreen=null;
+        if(!(screen instanceof net.minecraft.client.gui.inventory.GuiContainer))return;
+        if(!guiClickMethodResolved)resolveGuiClickMethod();
+        if(guiMouseReleasedMethod==null)return;
+        int x=MathHelper.clamp(screen.width/2+cx,0,Math.max(0,screen.width-1)),y=MathHelper.clamp(screen.height/2+cy,0,Math.max(0,screen.height-1));
+        pointerSnap(x,y);
+        try{guiMouseReleasedMethod.invoke(screen,Integer.valueOf(x),Integer.valueOf(y),Integer.valueOf(button));}
         catch(Exception e){warnClickFailure("Recorded GUI release failed",e);}
         if(mc.currentScreen!=screen)clearLeftClickBlock();
     }
@@ -524,19 +576,44 @@ public class RecordingHandler {
         int[] d=e.data;
         while(e.at+6<=d.length){
             int i=e.at,action=d[i],key=d[i+1],aux=d[i+2],flags=d[i+3],cx=d[i+4],cy=d[i+5];
-            if((flags&GUI_FLAG_TIMED)!=0){int due=action==GA_TYPE?cx:key;float speed=Math.max(0.25f,config.getPlaybackSpeed());due=Math.max(0,Math.round(due/speed));long elapsed=(System.nanoTime()-e.startedNs)/1000000L;if(elapsed<due)return false;}
-            e.at+=6;
-            if(action==GA_TYPE){if(guiKeyTypedMethod!=null)try{guiKeyTypedMethod.invoke(screen,Character.valueOf((char)aux),Integer.valueOf(key));}catch(Exception ex){warnClickFailure("Recorded key replay failed",ex);}}
-            else if(action==GA_CLOSE){
-                if(screen instanceof net.minecraft.client.gui.inventory.GuiContainer)closeRecordedScreen(screen);
-                else if(guiKeyTypedMethod!=null){try{guiKeyTypedMethod.invoke(screen,Character.valueOf('\0'),Integer.valueOf(1));}catch(Exception ex){warnClickFailure("Recorded Esc replay failed",ex);}}
-                else closeRecordedScreen(screen);
+            if(!guiKeyDue(e,action,key,flags,cx))return false;
+            if(action==GA_DRAG||action==GA_DRAG_END){
+                // Непрерывное значение: из всех созревших точек драга подряд доставляем только последнюю.
+                // Промежуточные применялись бы за микросекунды друг от друга: глаз и ухо их не видят,
+                // а лесенку громкости (треск) и дёрганье чисел они дают. Порядок и финал сохраняются.
+                int j=i;boolean end=(action==GA_DRAG_END);
+                // Отпуск закрывает жест: дальше может идти уже следующий драг — его не глотаем.
+                if(!end)while(j+12<=d.length){
+                    int na=d[j+6];if(na!=GA_DRAG&&na!=GA_DRAG_END)break;
+                    if(!guiKeyDue(e,na,d[j+7],d[j+9],d[j+10]))break;
+                    j+=6;cx=d[j+4];cy=d[j+5];end=(d[j]==GA_DRAG_END);
+                    if(end)break;
+                }
+                e.at=j+6;deliverSliderDrag(screen,cx,cy,end);
+            }else{
+                e.at+=6;
+                if(action==GA_TYPE){if(guiKeyTypedMethod!=null)try{guiKeyTypedMethod.invoke(screen,Character.valueOf((char)aux),Integer.valueOf(key));}catch(Exception ex){warnClickFailure("Recorded key replay failed",ex);}}
+                else if(action==GA_CLOSE){
+                    if(screen instanceof net.minecraft.client.gui.inventory.GuiContainer)closeRecordedScreen(screen);
+                    else if(guiKeyTypedMethod!=null){try{guiKeyTypedMethod.invoke(screen,Character.valueOf('\0'),Integer.valueOf(1));}catch(Exception ex){warnClickFailure("Recorded Esc replay failed",ex);}}
+                    else closeRecordedScreen(screen);
+                }
+                else if(action==GA_CMOVE)deliverContainerMove(screen,cx,cy,aux);
+                else if(action==GA_CRELEASE)deliverContainerRelease(screen,cx,cy,aux);
+                else deliverContainerKey(screen,action,aux,(flags&2)!=0,cx,cy);
             }
-            else if(action==GA_DRAG||action==GA_DRAG_END)deliverSliderDrag(screen,cx,cy,action==GA_DRAG_END);
-            else deliverContainerKey(screen,action,aux,(flags&2)!=0,cx,cy);
             if(mc.currentScreen!=screen){clearLeftClickBlock();return true;}
         }
         return true;
+    }
+    /** Созрело ли событие по его записанной метке времени (с учётом скорости повтора). */
+    private boolean guiKeyDue(GuiKeyEvent e,int action,int key,int flags,int cx){
+        if((flags&GUI_FLAG_TIMED)==0)return true;
+        int due=action==GA_TYPE?cx:key;
+        float speed=Math.max(0.25f,config.getPlaybackSpeed());
+        due=Math.max(0,Math.round(due/speed));
+        long elapsed=(System.nanoTime()-e.startedNs)/1000000L;
+        return elapsed>=due;
     }
     private void deliverContainerKey(GuiScreen screen,int action,int aux,boolean ctrl,int cx,int cy){
         if(!(screen instanceof net.minecraft.client.gui.inventory.GuiContainer))return;
@@ -566,6 +643,8 @@ public class RecordingHandler {
     }
     /** Закрытие как в ванили: контейнер шлёт пакет на сервер, книга и табличка закрываются локально (табличка при этом отправляет текст в onGuiClosed). */
     private void closeRecordedScreen(GuiScreen screen){
+        // Закрытие отменяет отложенный релиз: предмет остаётся на курсоре — как в записи.
+        defPressActive=false;defPressScreen=null;
         if(screen instanceof net.minecraft.client.gui.inventory.GuiContainer){if(mc.player!=null)mc.player.closeScreen();}
         else mc.displayGuiScreen(null);
     }
@@ -614,6 +693,7 @@ public class RecordingHandler {
         if(frame.hasScreenState?name.equals(frame.openScreen):screenClickAhead(name)){screenMismatchTicks=0;return;}
         if(++screenMismatchTicks<SCREEN_CLOSE_DELAY)return;
         screenMismatchTicks=0;MirrorDebug.log("GUI","closing screen absent from the recording: "+name);
+        defPressActive=false;defPressScreen=null;
         if(container)mc.player.closeScreen();else mc.displayGuiScreen(null);clearLeftClickBlock();
     }
     /** Записи формата 2 открытый экран не хранят: там ориентир — записанные клики этого же окна впереди. */
@@ -961,8 +1041,10 @@ public class RecordingHandler {
         }
         for(Method m:GuiScreen.class.getDeclaredMethods()){String n=m.getName();Class<?>[] a=m.getParameterTypes();
             if(a.length==2&&a[0]==char.class&&a[1]==int.class&&(n.equals("keyTyped")||n.equals("func_73869_a")))guiKeyTypedMethod=m;}
-        try{if(guiMouseClickedMethod!=null)guiMouseClickedMethod.setAccessible(true);if(guiMouseReleasedMethod!=null)guiMouseReleasedMethod.setAccessible(true);if(guiKeyTypedMethod!=null)guiKeyTypedMethod.setAccessible(true);}
-        catch(Exception e){guiMouseClickedMethod=null;guiMouseReleasedMethod=null;guiKeyTypedMethod=null;warnClickFailure("Cannot access GuiScreen click methods",e);}
+        for(Method m:GuiScreen.class.getDeclaredMethods()){String n=m.getName();Class<?>[] a=m.getParameterTypes();
+            if(a.length==4&&a[0]==int.class&&a[1]==int.class&&a[2]==int.class&&a[3]==long.class){if(n.equals("mouseClickMove")||n.equals("func_146273_a"))guiMouseClickMoveMethod=m;else if(guiMouseClickMoveMethod==null)guiMouseClickMoveMethod=m;}}
+        try{if(guiMouseClickedMethod!=null)guiMouseClickedMethod.setAccessible(true);if(guiMouseReleasedMethod!=null)guiMouseReleasedMethod.setAccessible(true);if(guiKeyTypedMethod!=null)guiKeyTypedMethod.setAccessible(true);if(guiMouseClickMoveMethod!=null)guiMouseClickMoveMethod.setAccessible(true);}
+        catch(Exception e){guiMouseClickedMethod=null;guiMouseReleasedMethod=null;guiKeyTypedMethod=null;guiMouseClickMoveMethod=null;warnClickFailure("Cannot access GuiScreen click methods",e);}
     }
     private void warnClickFailure(String text,Exception e){MirrorDebug.log("CLICK","failure: "+text+" ("+(e==null?"unknown":e.toString())+")");if(!clickMethodWarning){clickMethodWarning=true;LOG.error(text,e);}}
     private void handleRecord(EntityPlayerSP player){
@@ -980,10 +1062,12 @@ public class RecordingHandler {
         boolean rmb=manager.getRightClickState();int rmbN=rmb?Math.max(1,manager.getRightClickCount()):0;boolean guiClick=(lmb||rmb||pendingGuiButton==2)&&pendingGuiClick;int guiBtn=guiClick?pendingGuiButton:0;injectChatPrefix();int[] guiKeys=flattenGuiKeys();float guiX=pendingGuiX,guiY=pendingGuiY;String guiScreen=pendingGuiScreen;boolean guiCenter=pendingGuiCenter;int guiCX=pendingGuiCX,guiCY=pendingGuiCY;boolean guiShift=guiClick&&pendingGuiShift;String openScreen=openScreenName();if((openScreen==null||openScreen.isEmpty())&&guiKeys!=null&&guiKeys.length>0)openScreen=pendingGuiKeyScreen;
         // Порядок кликов забираем всегда, даже когда запись кликов выключена: иначе он утечёт в следующие кадры.
         int[] clickOrder=manager.consumeClickSequence();
-        if(idx<=0){keyLog.clear();recRotInit=false;prevChatOpen=mc.currentScreen instanceof net.minecraft.client.gui.GuiChat;pendingKeyMask=0;pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiKeyScreen=null;pendingGuiButton=0;pendingGuiKeys.clear();}
+        if(idx<=0){keyLog.clear();recRotInit=false;prevChatOpen=mc.currentScreen instanceof net.minecraft.client.gui.GuiChat;pendingKeyMask=0;pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiKeyScreen=null;pendingGuiButton=0;pendingGuiKeys.clear();recDragButton=-1;recDragScreen=null;pendingDropAll=false;}
+        // Окно драга тихо закрылось (сервер, хоткей): неснятый драг дальше не пишется.
+        if(recDragScreen!=null){String cur=openScreenName();if(cur==null||!cur.equals(recDragScreen)){recDragButton=-1;recDragScreen=null;}}
         int mask=0;net.minecraft.client.settings.GameSettings gs=mc.gameSettings;
         if(gs!=null){if(gs.keyBindAttack.isKeyDown()||lmb)mask|=Frame.K_ATTACK;if(gs.keyBindUseItem.isKeyDown()||rmb)mask|=Frame.K_USE;if(gs.keyBindForward.isKeyDown())mask|=Frame.K_FORWARD;if(gs.keyBindBack.isKeyDown())mask|=Frame.K_BACK;if(gs.keyBindLeft.isKeyDown())mask|=Frame.K_LEFT;if(gs.keyBindRight.isKeyDown())mask|=Frame.K_RIGHT;if(gs.keyBindJump.isKeyDown())mask|=Frame.K_JUMP;if(gs.keyBindSneak.isKeyDown())mask|=Frame.K_SNEAK;if(gs.keyBindSprint.isKeyDown())mask|=Frame.K_SPRINT;if(gs.keyBindDrop.isKeyDown())mask|=Frame.K_DROP;if(gs.keyBindSwapHands.isKeyDown())mask|=Frame.K_SWAP;if(gs.keyBindInventory.isKeyDown())mask|=Frame.K_INVENTORY;if(gs.keyBindPickBlock.isKeyDown())mask|=Frame.K_PICK;}mask|=pendingKeyMask;pendingKeyMask=0;
-        boolean dropAll=(mask&Frame.K_DROP)!=0&&GuiScreen.isCtrlKeyDown();
+        boolean dropAll=(mask&Frame.K_DROP)!=0&&(pendingDropAll||GuiScreen.isCtrlKeyDown());pendingDropAll=false;
         int hotbar=player.inventory!=null?MathHelper.clamp(player.inventory.currentItem,0,8):-1;
         float dy=0f,dp=0f;if(recRotInit){dy=MathHelper.wrapDegrees(player.rotationYaw-lastRecYaw);dp=player.rotationPitch-lastRecPitch;}lastRecYaw=player.rotationYaw;lastRecPitch=player.rotationPitch;recRotInit=true;
         boolean worldReset=worldResetPending;worldResetPending=false;
@@ -1016,7 +1100,7 @@ public class RecordingHandler {
      *  нельзя приклеивать к следующему кадру — иначе в записи появляется событие, которого в игровом ��ире не было. */
     private void clearPendingInput(){
         pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiKeyScreen=null;pendingGuiButton=0;pendingGuiKeys.clear();
-        manager.setLeftClickState(false);manager.setRightClickState(false);manager.clearClickSequence();pendingKeyMask=0;
+        manager.setLeftClickState(false);manager.setRightClickState(false);manager.clearClickSequence();pendingKeyMask=0;pendingDropAll=false;
     }
     private String openScreenName(){GuiScreen s=mc.currentScreen;if(s==null)return null;String n=s.getClass().getName();return n.startsWith("com.mirror.recorder.gui.")?null:n;}
     private void handlePlayback(EntityPlayerSP player){
@@ -1047,6 +1131,7 @@ public class RecordingHandler {
     }
     private void resetPlayback(){forceResetKeys();}
     private void forceResetKeys(){
+        flushDeferredPress();
         stallTicks=0;
         releaseReplayedKeys();pointerOn=false;typeText=null;typeNextNs=0L;chatKeyReplay=false;keyLog.clear();
         if(mc.gameSettings!=null){restorePhysical(mc.gameSettings.keyBindAttack);restorePhysical(mc.gameSettings.keyBindUseItem);if(mc.gameSettings.keyBindsHotbar!=null)for(KeyBinding h:mc.gameSettings.keyBindsHotbar)drainPressQueue(h);drainPressQueue(mc.gameSettings.keyBindDrop);drainPressQueue(mc.gameSettings.keyBindSwapHands);drainPressQueue(mc.gameSettings.keyBindPickBlock);drainPressQueue(mc.gameSettings.keyBindInventory);}if(mc.player!=null)mc.player.setSprinting(false);wantSprint=false;sprintAssist=false;chatQueue.clear();lastChatSentAt=0L;appliedRun=-1L;appliedFrame=-1;interactionRun=-1L;interactionFrame=-1;guiQueue.clear();lastHotbar=-1;heldAttack=false;heldUse=false;lastMask=0;rotRun=-1L;rotFrame=-1;lookDYaw=0f;lookDPitch=0f;popInterpolatedLook();recRotInit=false;pendingChatMessage=null;pendingGuiClick=false;pendingGuiCenter=false;pendingGuiScreen=null;importedChatWarned=false;resetStabilizer();keysNeedReset=false;useHoldFallbackDelay=0;wantSprint=false;useTimerAlign=false;maskRun=-1L;screenMismatchTicks=0;pendingGuiShift=false;pendingGuiKeyScreen=null;recordTickStartNs=0L;pendingGuiKeys.clear();replaySlider=null;replaySliderScreen=null;noticeGuiDrop=false;autoCheckpointTicks=0;pendingGuiButton=0;worldResetPending=false;worldSuspendTicks=0;
@@ -1059,7 +1144,8 @@ public class RecordingHandler {
     @SubscribeEvent public void onWorldLoad(WorldEvent.Load event){if(event.getWorld().isRemote&&manager.isBusy()){worldResetPending=true;if(manager.isRecording())sendMsg(L("§aНовый мир: запись продолжается.","§aNew world: recording continues.","§aНовий світ: запис триває.","§aNeue Welt: Aufnahme läuft weiter.","§aNowy świat: nagrywanie trwa."));else if(manager.isPlaying())sendMsg(L("§aНовый мир: повтор продо��жается.","§aNew world: playback continues.","§aНовий світ: відтворення триває.","§aNeue Welt: Wiedergabe läuft weiter.","§aNowy świat: odtwarzanie trwa."));}}
     @SubscribeEvent public void onClientChat(ClientChatEvent event){if(manager.isRecording()&&mc.currentScreen instanceof net.minecraft.client.gui.GuiChat){String msg=event.getMessage();if(msg!=null&&!msg.isEmpty())pendingChatMessage=msg;}}
     @SubscribeEvent public void onMouseInput(InputEvent.MouseInputEvent event){
-        if(!manager.isRecording()||mc.currentScreen!=null||!Mouse.getEventButtonState())return;int btn=Mouse.getEventButton();pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiButton=0;if(btn==0)manager.addLeftClick();else if(btn==1)manager.addRightClick();
+        // Сюда доходят только события без экрана: любой вооружённый драг окна уже протух (окно тихо закрылось).
+        if(!manager.isRecording())return;recDragButton=-1;recDragScreen=null;if(mc.currentScreen!=null||!Mouse.getEventButtonState())return;int btn=Mouse.getEventButton();pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiButton=0;if(btn==0)manager.addLeftClick();else if(btn==1)manager.addRightClick();
     }
     @SubscribeEvent public void onGuiMouseInput(GuiScreenEvent.MouseInputEvent.Pre event){
         if(!manager.isRecording())return;GuiScreen screen=event.getGui();if(screen==null)return;String name=screen.getClass().getName();
@@ -1070,6 +1156,29 @@ public class RecordingHandler {
         if(down&&btn>=0&&btn<=2){
             pendingGuiButton=btn;pendingGuiClick=true;pendingGuiX=fx;pendingGuiY=fy;pendingGuiCX=cx;pendingGuiCY=cy;pendingGuiCenter=true;pendingGuiShift=GuiScreen.isShiftKeyDown();pendingGuiScreen=name;
             if(btn==0){manager.setLeftClickState(true);manager.addClickOrder(0);}else if(btn==1){manager.setRightClickState(true);manager.addClickOrder(1);}
+        }
+        if(down&&btn>=0&&btn<=2&&recDragButton<0&&screen instanceof net.minecraft.client.gui.inventory.GuiContainer&&(btn==0||btn==1)&&!GuiScreen.isShiftKeyDown()){recDragButton=btn;recDragScreen=name;recDragLastMoveNs=0L;recDragLastX=cx;recDragLastY=cy;}
+        // Смена окна роняет незавершённый драг: отпуск чужого окна не пишется.
+        if(recDragScreen!=null&&!recDragScreen.equals(name)){recDragButton=-1;recDragScreen=null;}
+        if(screen instanceof net.minecraft.client.gui.inventory.GuiContainer){
+            if(!down&&btn>=0&&btn<=2){
+                if(btn==recDragButton&&name.equals(recDragScreen)){
+                    if(pendingGuiKeys.size()<GUI_KEY_LIMIT){pendingGuiKeyScreen=name;pendingGuiKeys.add(new int[]{GA_CRELEASE,eventOffsetMs(),btn,GUI_FLAG_TIMED,cx,cy});}
+                    else MirrorDebug.log("GUI","key event cap "+GUI_KEY_LIMIT+" reached in one tick, container release dropped");
+                    recDragButton=-1;recDragScreen=null;
+                }
+            }else if(btn==-1&&recDragButton>=0&&name.equals(recDragScreen)){
+                boolean held=false;try{held=Mouse.isButtonDown(recDragButton);}catch(Exception ignored){}
+                if(!held){recDragButton=-1;recDragScreen=null;}
+                else if(cx!=recDragLastX||cy!=recDragLastY){
+                    long now=System.nanoTime();
+                    // ~12 мс: путь для сплита слотов сохраняется, мусор от 1000 Гц мыши — нет.
+                    if(now-recDragLastMoveNs>=12000000L){
+                        if(pendingGuiKeys.size()<GUI_KEY_LIMIT){pendingGuiKeyScreen=name;pendingGuiKeys.add(new int[]{GA_CMOVE,eventOffsetMs(),recDragButton,GUI_FLAG_TIMED,cx,cy});recDragLastMoveNs=now;recDragLastX=cx;recDragLastY=cy;}
+                        else MirrorDebug.log("GUI","key event cap "+GUI_KEY_LIMIT+" reached in one tick, container move dropped");
+                    }
+                }
+            }
         }
         boolean dragMove=btn==-1&&Mouse.isButtonDown(0),dragEnd=btn==0&&!down;
         if(settingsScreen(screen)&&((btn==0&&down)||dragMove||dragEnd)){
@@ -1163,7 +1272,7 @@ public class RecordingHandler {
         if(manager.isRecording()&&Keyboard.getEventKeyState()&&mc.currentScreen==null&&mc.gameSettings!=null){
             net.minecraft.client.settings.GameSettings g=mc.gameSettings;int pk=Keyboard.getEventKey();
             if(g.keyBindInventory.isActiveAndMatches(pk))pendingKeyMask|=Frame.K_INVENTORY;
-            else if(g.keyBindDrop.isActiveAndMatches(pk))pendingKeyMask|=Frame.K_DROP;
+            else if(g.keyBindDrop.isActiveAndMatches(pk)){pendingKeyMask|=Frame.K_DROP;pendingDropAll=pendingDropAll||GuiScreen.isCtrlKeyDown();}
             else if(g.keyBindSwapHands.isActiveAndMatches(pk))pendingKeyMask|=Frame.K_SWAP;
             else if(g.keyBindPickBlock.isActiveAndMatches(pk))pendingKeyMask|=Frame.K_PICK;
         }
