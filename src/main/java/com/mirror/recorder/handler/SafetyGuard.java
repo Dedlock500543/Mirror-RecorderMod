@@ -11,8 +11,8 @@ public final class SafetyGuard{
     public String check(EntityPlayerSP player,RecorderConfig config){
         if(player==null||config==null)return null;
         float now=total(player),before=lastTotal;lastTotal=now;
-        // Льготная секунда тикает всегда: иначе выключенный на время страж «вызревает» рывком при включении.
-        if(grace>0)grace--;
+        // Льготная секунда тикает всегда (иначе выключенный страж «вызревает» рывком при включении), а пока она идёт — удар не считаем.
+        if(grace>0){grace--;return null;}
         if(!config.isGuardOnDamage())return null;
         if(before>=0f&&now<before-0.01f)
             return com.mirror.recorder.gui.Lang.s("Остановлено: по вам попали","Stopped: you took damage","Зупинено: по вас влучили","Gestoppt: Sie wurden getroffen","Zatrzymano: otrzymano obrażenia");

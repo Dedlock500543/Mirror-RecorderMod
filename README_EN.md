@@ -356,7 +356,7 @@ By default, **Auto** follows the Minecraft language setting.
 
 The language can also be selected manually in:
 
-**Settings → Interface → Language**
+**Settings → General → Language**
 
 ### Control Names
 
