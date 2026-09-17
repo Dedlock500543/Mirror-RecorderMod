@@ -1,0 +1,15 @@
+# Все текстовые файлы — LF, чтобы diff и сборка не зависели от ОС.
+* text=auto eol=lf
+*.java text eol=lf
+*.gradle text eol=lf
+*.md text eol=lf
+*.properties text eol=lf
+*.txt text eol=lf
+*.bat text eol=crlf
+
+# Бинарные файлы не трогаем.
+*.jar binary
+*.nbt binary
+*.mrr binary
+*.png binary
+*.ogg binary

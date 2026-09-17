@@ -42,7 +42,14 @@ public class RecordingFileStore{
         try{if(tmp.exists()&&!tmp.delete())return false;
             writeFast(root,tmp);
             if(!verifyStream(tmp)){LOG.error("Written file for slot {} failed verification, keeping the old one",slot);MirrorDebug.log("STORAGE","verification failed for slot "+slot+", backup untouched");tmp.delete();return false;}
-            if(nbt.exists()){if(bak.exists()&&!bak.delete()){tmp.delete();return false;}if(!moveFile(nbt,bak)){tmp.delete();return false;}}
+            if(nbt.exists()){
+                // Основной файл повреждён: он не должен вытеснить целую резервную копию.
+                boolean primaryOk=verifyStream(nbt);
+                boolean backupOk=bak.isFile()&&verifyStream(bak);
+                if(!primaryOk){
+                    MirrorDebug.log("STORAGE","corrupt primary for slot "+slot+(backupOk?", keeping the good backup":", no good backup"));}
+                if(!primaryOk&&backupOk){if(!nbt.delete()){tmp.delete();return false;}}
+                else{if(bak.exists()&&!bak.delete()){tmp.delete();return false;}if(!moveFile(nbt,bak)){tmp.delete();return false;}}}
             if(!moveFile(tmp,nbt)){if(bak.exists())moveFile(bak,nbt);tmp.delete();return false;}
             return true;
         }catch(Exception e){LOG.error("Atomic write failed for slot {}",slot,e);if(tmp.exists())tmp.delete();if(!nbt.exists()&&bak.exists())moveFile(bak,nbt);return false;}}

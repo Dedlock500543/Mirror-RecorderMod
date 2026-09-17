@@ -78,13 +78,22 @@ The mod obtains the game directory through Forge and does not write to unrelated
 | --------------- | -------------------------------- |
 | Configuration   | `config/mirror_recorder.cfg`     |
 | Recordings      | `mirror_recorder/slot_N.nbt`     |
-| Backups         | `mirror_recorder/slot_N.nbt.bak` |
-| Temporary files | `mirror_recorder/slot_N.nbt.tmp` |
+| Backups         | `mirror_recorder/slot_N.bak` |
+| Temporary files | `mirror_recorder/slot_N.tmp` |
 | Exports         | `mirror_recorder/exports/*.mrr`  |
 | Trash           | `mirror_recorder/trash/`         |
 | Diagnostic log  | `logs/mirror-debug.log`          |
 
 The trash keeps up to **100 recently deleted recordings**.
+
+### Diagnostics
+
+The `logs/mirror-debug.log` file is switched on by the `debug` setting in `config/mirror_recorder.cfg`.
+
+The JVM flags `-Dmirror.debug=true` and `-Dmirror.debug.csv=true` force diagnostics **on**: while a flag is set the log
+cannot be switched off in the settings — only restarting the game without the flag helps.
+
+The CSV dump (`mirror-debug.csv`) is written next to the game directory and is capped at 200,000 rows.
 
 ---
 
@@ -155,9 +164,19 @@ When frames are skipped:
 
 Mirror Recorder provides limited route stabilization.
 
-It works **through normal player input only** and does not use teleportation or direct coordinate manipulation.
+It works **through normal player input only** and does not use teleportation or direct coordinate manipulation:
 
-This allows small deviations to be corrected while preserving normal game mechanics.
+* switched on by «Route stabilization» in **Settings → Replay**;
+* only works at **1.0×** speed — at any other speed the mod reports that stabilization is off;
+* if the deviation exceeds **3 blocks** playback stops with a message (in elytra flight the limit is softer —
+  **16 blocks** with up to 2 seconds of patience, because flight physics catches up with the route on its own);
+* elytra correction is capped at 0.35 blocks per tick.
+
+### Right-click timer
+
+Vanilla keeps a right-click delay (3 ticks by default) and can swallow the next recorded click. With exact block
+placement the mod aligns that timer (3 → 4 ticks) so playback places blocks at the same pace as a live player's hand.
+This is the only place where the mod touches a vanilla timer.
 
 ---
 
@@ -258,6 +277,25 @@ Chat playback sends **real messages and commands** to the server.
 
 > ⚠️ On public servers, automated input may be prohibited by server rules.
 
+### Commands
+
+Everything is available from chat with `/mirror`:
+
+| Command | What it does |
+| --- | --- |
+| `/mirror record <slot>` | start recording into a slot |
+| `/mirror play <slot>` | play the recording once |
+| `/mirror loop <slot>` | play the recording in a loop |
+| `/mirror limit <1–5>` | how many rounds before stopping |
+| `/mirror pause` | pause and resume playback |
+| `/mirror stop` | stop recording or playback |
+| `/mirror selftest` | engine self-test: events and timestamps |
+| `/mirror list [page]` | show slots 1–100 |
+| `/mirror delete <slot>` | delete a recording (to the trash first) |
+| `/mirror name <slot>` | set the slot name |
+| `/mirror marker <slot>` | set the slot marker |
+| `/mirror gui` | open the mod window |
+
 ### Chat Recording
 
 Chat recording is **disabled by default**.
@@ -270,7 +308,7 @@ This prevents recordings from accidentally storing:
 
 It can be enabled in:
 
-**Settings → Recording**
+**Settings → Replay**
 
 ### Imported Recordings
 

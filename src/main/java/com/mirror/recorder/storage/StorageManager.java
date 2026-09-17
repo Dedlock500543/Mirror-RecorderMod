@@ -65,15 +65,28 @@ public class StorageManager{
         if(bak!=null){LOG.warn("Slot {} loaded from .bak with {} damaged frames skipped",slot,bakSkipped);MirrorDebug.log("STORAGE","slot "+slot+": kept "+bak.size()+" frames from .bak, skipped "+bakSkipped+" damaged");return bak;}
         MirrorDebug.log("STORAGE","slot "+slot+": no readable recording in .nbt or .bak");return new ArrayList<Frame>();}
     // === Удаление и корзина ===
-    public boolean deleteRecording(int slot){
-        if(!validSlot(slot))return false;
-        if(!awaitSlotQuiescent(slot)){LOG.error("Refusing to delete slot {}: background save did not finish in time",Integer.valueOf(slot));return false;}
+    /** Коды результата удаления: GUI и команда показывают по ним точный текст. */
+    public static final int DELETE_FAILED=0,DELETE_TRASHED=1,DELETE_NO_COPY=2,DELETE_PARTIAL=3;
+    public boolean deleteRecording(int slot){return deleteRecordingEx(slot)!=DELETE_FAILED;}
+    public int deleteRecordingEx(int slot){
+        if(!validSlot(slot))return DELETE_FAILED;
+        if(!awaitSlotQuiescent(slot)){LOG.error("Refusing to delete slot {}: background save did not finish in time",Integer.valueOf(slot));return DELETE_FAILED;}
         NBTTagCompound best=fileStore.bestRootForBackup(slot,codec);
-        if(best!=null&&!trashStore.archiveToTrash(slot,best)){LOG.error("Refusing to delete slot {}: trash copy failed",slot);return false;}
+        int status=DELETE_TRASHED;
+        if(best!=null){
+            if(!trashStore.archiveToTrash(slot,best)){LOG.error("Refusing to delete slot {}: trash copy failed",slot);return DELETE_FAILED;}
+        }else{
+            // Нечитаемый слот: удаляем без копии, но честно сообщаем об этом.
+            status=DELETE_NO_COPY;LOG.warn("Deleting slot {} without a trash copy: no readable recording",Integer.valueOf(slot));
+            MirrorDebug.log("STORAGE","slot "+slot+" deleted without trash copy (unreadable)");
+        }
         File t=fileStore.tmpFile(slot),b=fileStore.bakFile(slot),n=fileStore.nbtFile(slot);
-        if(n.exists()&&!n.delete())return false;boolean ok=!t.exists()||t.delete();if(b.exists()&&!b.delete())ok=false;
-        invalidateSummary(slot);return ok;}
-    public boolean moveToTrash(int slot){if(!awaitSlotQuiescent(slot)){LOG.error("Refusing to trash slot {}: background save did not finish in time",Integer.valueOf(slot));return false;}NBTTagCompound r=readStructuralRoot(slot);if(r==null)return false;boolean ok=trashStore.moveToTrash(slot,r);if(ok)invalidateSummary(slot);return ok;}
+        boolean ok=true;
+        if(n.exists()&&!n.delete()){LOG.error("Could not delete main file of slot {}",Integer.valueOf(slot));return DELETE_FAILED;}
+        if(t.exists()&&!t.delete()){LOG.error("Could not delete temp file of slot {}",Integer.valueOf(slot));ok=false;}
+        if(b.exists()&&!b.delete()){LOG.error("Could not delete backup of slot {}",Integer.valueOf(slot));ok=false;}
+        invalidateSummary(slot);
+        if(!ok)return DELETE_PARTIAL;return status;}
     public boolean restoreTrash(String name,int slot){if(!validSlot(slot))return false;if(!awaitSlotQuiescent(slot))return false;if(peekFrameCount(slot)>0)return false;boolean ok=trashStore.restoreTrash(name,slot,codec,fileStore);if(ok){invalidateSummary(slot);}return ok;}
     public boolean deleteTrash(String name){return trashStore.deleteTrash(name);}
     public boolean clearTrash(){return trashStore.clearTrash();}

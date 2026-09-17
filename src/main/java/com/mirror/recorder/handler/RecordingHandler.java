@@ -32,7 +32,7 @@ public class RecordingHandler {
     private final java.util.ArrayDeque<int[]> keyLog=new java.util.ArrayDeque<int[]>();
     private final java.util.HashSet<Integer> replayedKeys=new java.util.HashSet<Integer>();
     /** Нарисованный курсор повтора: системная мышь остаётся у пользователя. */
-    private boolean pointerOn=false;private float pointerX=0f,pointerY=0f;private float pointerFromX=0f,pointerFromY=0f,pointerToX=0f,pointerToY=0f;private long pointerStartNs=0L,pointerDurNs=50000000L,pointerLastNs=0L;private int typeWait=0;private boolean chatWarned=false;private boolean chatKeyReplay=false;private boolean prevChatOpen=false;private int pendingKeyMask=0;private static final int CHAT_OPEN_WAIT=20;
+    private boolean guiKeyProbeLogged=false;private boolean pointerOn=false;private float pointerX=0f,pointerY=0f;private float pointerFromX=0f,pointerFromY=0f,pointerToX=0f,pointerToY=0f;private long pointerStartNs=0L,pointerDurNs=50000000L,pointerLastNs=0L;private int typeWait=0;private boolean chatWarned=false;private boolean chatKeyReplay=false;private boolean prevChatOpen=false;private int pendingKeyMask=0;private static final int CHAT_OPEN_WAIT=20;
     private static final int POINTER_EDGE=0xFF0B1120,POINTER_BODY=0xFF7AA2FF;
     /** Живой чат: текст печатается в настоящем окне чата по одной букве. */
     private String typeText=null;private int typeAt=0;private long typeNextNs=0L;
@@ -69,19 +69,23 @@ public class RecordingHandler {
         resetPlayback();manager.stopAll();forceResetKeys();guard.standby(mc.player);
         SoundFx.error();com.mirror.recorder.debug.MirrorDebug.log("GUARD",reason);sendMsg("\u00a7c[!] "+reason);
     }
-    @SubscribeEvent(priority=EventPriority.LOWEST)
+    /** Источник номера цикла — контроллер возврата: только он знает про цикл после снятия мёртвого движка в менеджере. */
+    private static BaritoneReturnController returnCycleSource(){MirrorRecorder mod=MirrorRecorder.getInstance();return mod==null?null:mod.getReturnController();}
+    /** Порядок правки ввода зафиксирован приоритетом, а не порядком регистрации: этот обработчик идёт раньше,
+     *  контроллер возврата (LOWEST) правит ввод последним — он и должен побеждать в фазах доводки и подготовки. */
+    @SubscribeEvent(priority=EventPriority.LOW)
     public void onInputUpdate(InputUpdateEvent event){
         if(!manager.isPlaying())return;
         EntityPlayerSP player=mc.player;if(player==null)return;
-        // Пауза: записанный ввод не навязывается вообще — кадр стоит, игрок свободен.
-        if(manager.isPaused()){event.getMovementInput().moveForward=0f;event.getMovementInput().moveStrafe=0f;event.getMovementInput().jump=false;event.getMovementInput().sneak=false;wantSprint=false;sprintAssist=false;return;}
+        // Пауза: кадр стоит, но ввод игрока не трогаем — иначе пауза превращается в «руки в стороны».
+        if(manager.isPaused())return;
         Frame frame=manager.getCurrentPlaybackFrame();if(frame==null)return;
         boolean replaySneak=config.isPlaybackSneak()&&(frame.hasKeyMask?frame.key(Frame.K_SNEAK):frame.sneak);
         trajectory.updateCalibration(player);event.getMovementInput().sneak=replaySneak;
         if(config.isPlaybackMovement()){
             float rawForward=frame.hasKeyMask?((frame.key(Frame.K_FORWARD)?1f:0f)-(frame.key(Frame.K_BACK)?1f:0f)):frame.moveForward,rawStrafe=frame.hasKeyMask?((frame.key(Frame.K_LEFT)?1f:0f)-(frame.key(Frame.K_RIGHT)?1f:0f)):frame.moveStrafe;
             float forward=MathHelper.clamp(rawForward,-1.0f,1.0f),strafe=MathHelper.clamp(rawStrafe,-1.0f,1.0f);if(!config.isApplyRotation()&&(forward!=0f||strafe!=0f)){double rec=Math.toRadians(frame.yaw),cur=Math.toRadians(player.rotationYaw),worldX=-forward*Math.sin(rec)+strafe*Math.cos(rec),worldZ=forward*Math.cos(rec)+strafe*Math.sin(rec),nf=-worldX*Math.sin(cur)+worldZ*Math.cos(cur),ns=worldX*Math.cos(cur)+worldZ*Math.sin(cur),peak=Math.max(Math.abs(nf),Math.abs(ns));if(peak>1d){nf/=peak;ns/=peak;}forward=(float)nf;strafe=(float)ns;}
-            // Ваниль замедляет красться ×0.3 вн��три updatePlayerMoveState до нашего хука — масштабируем ДО
+            // Ваниль замедляет красться ×0.3 внутри updatePlayerMoveState до нашего хука — масштабируем ДО
             // стабилизации: иначе поправка считается по полному вводу, а применяется к урезанному и теряет 70% авторитета.
             if(replaySneak){forward*=0.3f;strafe*=0.3f;}
             if(!stabilizeRoute(player,frame,forward,strafe)){event.getMovementInput().moveForward=0f;event.getMovementInput().moveStrafe=0f;event.getMovementInput().jump=false;event.getMovementInput().sneak=false;return;}
@@ -272,7 +276,7 @@ public class RecordingHandler {
         boolean grabbed=true;try{grabbed=Mouse.isGrabbed();}catch(Exception e){grabbed=true;}
         if(mc.inGameHasFocus&&grabbed)return;
         // Окно свёрнуто — забирать курсор нельзя: пользователь работает в другой программе.
-        try{if(!org.lwjgl.opengl.Display.isActive())return;}catch(Exception e){}
+        try{if(!org.lwjgl.opengl.Display.isActive())return;}catch(Exception e){MirrorDebug.log("GUI","Display.isActive failed: "+e);}
         MirrorRecorder mod=MirrorRecorder.getInstance();BaritoneReturnController r=mod==null?null:mod.getReturnController();
         if(!(manager.isBusy()||(r!=null&&(r.isBusy()||r.isRecovering()))))return;
         mc.setIngameFocus();mouseMoveGrace=MOUSE_REGRAB_GRACE;mouseMovePixels=0d;mouseFree=false;
@@ -301,8 +305,8 @@ public class RecordingHandler {
         if(limitSlot>0)sendMsg(L("§eЗапись остановлена: достигнут лимит ","§eRecording stopped: the frame limit of ","§eЗапис зупинено: досягнуто ліміт ","§eAufnahme gestoppt: das Limit von ","§eNagranie zatrzymane: osiągnięto limit ")+com.mirror.recorder.storage.StorageManager.MAX_FRAMES+L(" кадров (1 час). Слот сохраняется в фоне."," frames (1 hour) was reached. The slot is saving in the background."," кадрів (1 годину). Слот зберігається у фоні."," Frames (1 Stunde) wurde erreicht. Der Slot wird im Hintergrund gespeichert."," klatek (1 godzina) został osiągnięty. Slot zapisuje się w tle."));
         if(nowRec&&!sndRec)SoundFx.recordStart();
         if(!nowRec&&sndRec)SoundFx.recordStop();
-        if(nowPlay&&!sndPlay){SoundFx.playStart();sndCycle=manager.getPlaybackCycle();}
-        else if(nowPlay){int cyc=manager.getPlaybackCycle();if(cyc>sndCycle){sndCycle=cyc;SoundFx.cycle();}}
+        if(nowPlay&&!sndPlay){SoundFx.playStart();BaritoneReturnController rc=returnCycleSource();sndCycle=rc==null?1:rc.getCycle();}
+        else if(nowPlay){BaritoneReturnController rc=returnCycleSource();int cyc=rc==null?1:rc.getCycle();if(cyc>sndCycle){sndCycle=cyc;SoundFx.cycle();}}
         sndRec=nowRec;sndPlay=nowPlay;
         if(nowRec||nowPlay||manager.hasPendingAction()){String threat=guard.check(player,config);if(threat!=null){emergencyStop(threat);return;}}else guard.standby(player);
         if((manager.isPlaying()||manager.isRecording()||manager.hasPendingAction())&&(player.isDead||player.getHealth()<=0f)){boolean wasRec=manager.isRecording();manager.stopAll();forceResetKeys();sendMsg(wasRec?L("§eЗапись остановлена: игрок погиб.","§eRecording stopped: the player died.","§eЗапис зупинено: гравець загинув.","§eAufnahme gestoppt: Der Spieler ist gestorben.","§eNagrywanie zatrzymane: gracz zginął."):L("§eПовтор остановлен: игрок погиб.","§ePlayback stopped: the player died.","§eВідтворення зупинено: гравець загинув.","§eWiedergabe gestoppt: Der Spieler ist gestorben.","§eOdtwarzanie zatrzymane: gracz zginął."));return;}
@@ -330,10 +334,11 @@ public class RecordingHandler {
         if(fresh&&frame!=null&&!blocked){
             interactionRun=run;interactionFrame=index;
             java.util.List<Frame> pending=manager.consumeSkippedFrames();
-            // Первый кадр запуска: состояние кнопок берём из него самого. При lastMask=0 зажатая в записи
-            // кнопка выглядит как новое нажатие и на нулевом кадре стреляет лишний клик. Настоящее нажатие
-            // ровно на этом кадре приходит через frame.leftClick/attackClicks и не теряется.
-            if(maskRun!=run){Frame seed=pending.isEmpty()?frame:pending.get(0);maskRun=run;lastMask=seed.hasKeyMask?seed.keyMask:0;}
+            // Первый кадр запуска: зажатые кнопки (клики, движение, крад) берём из него самого, иначе зажатая
+            // в записи кнопка выглядит как новое нажатие и на нулевом кадре стреляет лишний клик.
+            // Мгновенные действия (Q/E, СКМ, инвентарь) удержания не имеют: в первом кадре считаем их нажатием,
+            // иначе фронт 0→1 не срабатывает и дроп/инвентарь из первого кадра теряются при повторе.
+            if(maskRun!=run){Frame seed=pending.isEmpty()?frame:pending.get(0);maskRun=run;lastMask=(seed.hasKeyMask?seed.keyMask:0)&~Frame.K_INSTANT;}
             for(int i=0;i<pending.size();i++)replayFrameEvents(pending.get(i),false,interact);
             replayFrameEvents(frame,true,interact);
         }
@@ -366,7 +371,7 @@ public class RecordingHandler {
         int attackShots=frame.attackClicks>0?frame.attackClicks:(attackPress?1:0),useShots=frame.useClicks>0?frame.useClicks:(usePress?1:0);
         // Маска пропущенных кадров не нужна: их события доставляются по порядку через consumeSkippedFrames.
         applyHotbar(frame.hotbarSlot);
-        // При открытом окне ваниль не читает хоткеи: накопленное нажатие выстреливало после закрытия окна (фантомный дроп/инвентарь). Действия окна повтор��ются через guiKeys, мировые клавиши — только когда окна нет ни в записи, ни сейчас.
+        // При открытом окне ваниль не читает хоткеи: накопленное нажатие выстреливало после закрытия окна (фантомный дроп/инвентарь). Действия окна повторяются через guiKeys, мировые клавиши — только когда окна нет ни в записи, ни сейчас.
         boolean guiKeyCtx=frame.guiKeys.length>0||(frame.hasScreenState&&frame.openScreen!=null),hasGuiClose=false;
         for(int i=0;i+6<=frame.guiKeys.length;i+=6)if(frame.guiKeys[i]==GA_CLOSE){hasGuiClose=true;break;}
         if(mc.currentScreen==null&&!guiKeyCtx){if((mask&Frame.K_DROP)!=0&&(lastMask&Frame.K_DROP)==0&&mc.player!=null&&!mc.player.isSpectator())mc.player.dropItem(frame.dropAll);pulse(mc.gameSettings.keyBindSwapHands,(mask&Frame.K_SWAP)!=0,(lastMask&Frame.K_SWAP)!=0);pulse(mc.gameSettings.keyBindPickBlock,(mask&Frame.K_PICK)!=0,(lastMask&Frame.K_PICK)!=0);}
@@ -572,7 +577,8 @@ public class RecordingHandler {
     }
     /** Повтор нажатий в окне: печать идёт через keyTyped, действия слотов — напрямую в handleMouseClick, потому что ваниль смотрит на физический курсор и физический Ctrl. */
     private boolean deliverGuiKeys(GuiScreen screen,GuiKeyEvent e){
-        if(!guiClickMethodResolved){resolveGuiClickMethod();MirrorDebug.probe("GuiScreen.keyTyped",guiKeyTypedMethod!=null,"GUI key replay");}
+        if(!guiClickMethodResolved)resolveGuiClickMethod();
+        if(!guiKeyProbeLogged){guiKeyProbeLogged=true;MirrorDebug.probe("GuiScreen.keyTyped",guiKeyTypedMethod!=null,"GUI key replay");}
         int[] d=e.data;
         while(e.at+6<=d.length){
             int i=e.at,action=d[i],key=d[i+1],aux=d[i+2],flags=d[i+3],cx=d[i+4],cy=d[i+5];
@@ -740,12 +746,12 @@ public class RecordingHandler {
         for(int i=0;i+1<frame.keyEvents.length;i+=2){
             int code=frame.keyEvents[i];boolean down=frame.keyEvents[i+1]!=0;
             if(code<=0||systemKey(code)||ownKey(code)||drivenKey(code))continue;
-            try{KeyBinding.setKeyBindState(code,down);if(down){KeyBinding.onTick(code);replayedKeys.add(Integer.valueOf(code));}else replayedKeys.remove(Integer.valueOf(code));}catch(Exception e){}
+            try{KeyBinding.setKeyBindState(code,down);if(down){KeyBinding.onTick(code);replayedKeys.add(Integer.valueOf(code));}else replayedKeys.remove(Integer.valueOf(code));}catch(Exception e){MirrorDebug.log("INPUT","key replay failed for code "+code+": "+e);}
         }
     }
     private void releaseReplayedKeys(){
         if(replayedKeys.isEmpty())return;
-        for(Integer code:replayedKeys){if(code!=null)try{KeyBinding.setKeyBindState(code.intValue(),false);}catch(Exception e){}}
+        for(Integer code:replayedKeys){if(code!=null)try{KeyBinding.setKeyBindState(code.intValue(),false);}catch(Exception e){MirrorDebug.log("INPUT","key release failed for code "+code+": "+e);}}
         replayedKeys.clear();
     }
     /** Курсор записи в пикселях интерфейса: от размера окна не зависит. */
@@ -775,7 +781,7 @@ public class RecordingHandler {
         try{depthWas=org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);net.minecraft.client.renderer.GlStateManager.disableDepth();
             net.minecraft.client.gui.Gui.drawRect(x-5,y-1,x+6,y+2,POINTER_EDGE);net.minecraft.client.gui.Gui.drawRect(x-1,y-5,x+2,y+6,POINTER_EDGE);
             net.minecraft.client.gui.Gui.drawRect(x-4,y,x+5,y+1,POINTER_BODY);net.minecraft.client.gui.Gui.drawRect(x,y-4,x+1,y+5,POINTER_BODY);
-        }catch(Exception e){}finally{try{if(depthWas)net.minecraft.client.renderer.GlStateManager.enableDepth();else net.minecraft.client.renderer.GlStateManager.disableDepth();}catch(Exception e){}}
+        }catch(Exception e){MirrorDebug.log("GUI","pointer draw failed: "+e);}finally{try{if(depthWas)net.minecraft.client.renderer.GlStateManager.enableDepth();else net.minecraft.client.renderer.GlStateManager.disableDepth();}catch(Exception e){}}
     }
     @SubscribeEvent public void onDrawScreen(GuiScreenEvent.DrawScreenEvent.Post event){if(manager.isPlaying())drawPointer();}
     /** Печать по одной букве в настоящем окне чата. Не вышло — сообщение уйдёт как раньше, без потери. */
@@ -872,7 +878,7 @@ public class RecordingHandler {
         return null;
     }
     private void openChatScreen(){
-        try{if(!(mc.currentScreen instanceof net.minecraft.client.gui.GuiChat))mc.displayGuiScreen(new net.minecraft.client.gui.GuiChat());}catch(Exception e){}
+        try{if(!(mc.currentScreen instanceof net.minecraft.client.gui.GuiChat))mc.displayGuiScreen(new net.minecraft.client.gui.GuiChat());}catch(Exception e){MirrorDebug.log("CHAT","cannot open chat screen: "+e);}
     }
 
     /** Zhivoj chat ne poluchilsya: govorim ob etom odin raz za zapusk, chtoby otkaz ne byl nezametnym. */
@@ -916,7 +922,7 @@ public class RecordingHandler {
         if(active){lostFocus=false;return;}
         if(lostFocus)return;
         lostFocus=true;
-        if(!manager.isPlaying()&&!manager.isRecording())try{KeyBinding.unPressAllKeys();}catch(Exception e){}
+        if(!manager.isPlaying()&&!manager.isRecording())try{KeyBinding.unPressAllKeys();}catch(Exception e){MirrorDebug.log("INPUT","unPressAllKeys failed: "+e);}
     }
     /** Vec3d в 1.12.2 именует поля разно в obf и dev, поэтому берём по имени с перебором вариантов. */
     private static java.lang.reflect.Field[] VEC_FIELDS=null;
@@ -972,7 +978,7 @@ public class RecordingHandler {
         if(mc.currentScreen!=null||mc.player==null)return;
         // Zhivoj chat iz zapisi: okno otkryvaetsja po kadram, bukvy i strelki prihodjat zapisannymi klavishami.
         if(frame.openScreen.endsWith(".GuiChat")){
-            if(config.isVisibleChat()&&typeText==null&&frame.guiKeys.length>0){try{mc.displayGuiScreen(new net.minecraft.client.gui.GuiChat());chatKeyReplay=true;}catch(Exception e){}}
+            if(config.isVisibleChat()&&typeText==null&&frame.guiKeys.length>0){try{mc.displayGuiScreen(new net.minecraft.client.gui.GuiChat());chatKeyReplay=true;}catch(Exception e){MirrorDebug.log("CHAT","cannot replay chat screen: "+e);}}
             return;
         }
         boolean allowed=false;
@@ -986,13 +992,13 @@ public class RecordingHandler {
     private void applyHold(KeyBinding key,boolean down){if(key!=null)KeyBinding.setKeyBindState(key.getKeyCode(),down);}
     private void forceReleaseClicks(){if(mc.gameSettings==null)return;restorePhysical(mc.gameSettings.keyBindAttack);restorePhysical(mc.gameSettings.keyBindUseItem);}
     private void pulse(KeyBinding key,boolean down,boolean was){if(key==null||!down||was)return;KeyBinding.onTick(key.getKeyCode());}
-    /** Дискретный клик вызываем нап��ямую: очередь нажатий KeyBinding стирается unPressAllKeys при открытии паузы/инвентаря, а на сервере мир в этот момент продолжает тикать. Прицел обновляем перед к��иком, чтобы попадание соответствовало текущему кадру. */
+    /** Дискретный клик вызываем напрямую: очередь нажатий KeyBinding стирается unPressAllKeys при открытии паузы/инвентаря, а на сервере мир в этот момент продолжает тикать. Прицел обновляем перед кликом, чтобы попадание соответствовало текущему кадру. */
     private void fireRecordedClick(Frame frame,KeyBinding key,boolean right){
         drainPressQueue(key);if(frame.guiClick&&replayableScreen(frame.guiScreen)){queueGuiClick(frame,right?1:0);return;}
         // Свою кладку притормаживаем так же, как игра: иначе блоки уйдут быстрее ванильного темпа.
         if(right&&placeExact(frame)){
             if(!clickMethodsResolved)resolveClickMethods();
-            if(rightClickDelayField!=null)try{rightClickDelayField.setInt(mc,4);}catch(Exception e){}
+            if(rightClickDelayField!=null)try{rightClickDelayField.setInt(mc,4);}catch(Exception e){MirrorDebug.log("CLICK","rightClickDelayTimer override failed: "+e);}
             useTimerAlign=true;return;
         }
         if(mc.player==null||mc.world==null)return;
@@ -1022,7 +1028,7 @@ public class RecordingHandler {
         if(mc.entityRenderer!=null)mc.entityRenderer.getMouseOver(1.0F);
         if(sendClickBlockMethod!=null)try{sendClickBlockMethod.invoke(mc,Boolean.TRUE);}catch(Exception e){warnClickFailure("Held attack with open screen failed",e);}
     }
-    /** Открытый экран глушит ванильный повтор ПКМ через контекст клавиши. Повторяем тот же ритм вручную: вызов, когда таймер задержки дошёл до ��уля и рука свободна. */
+    /** Открытый экран глушит ванильный повтор ПКМ через контекст клавиши. Повторяем тот же ритм вручную: вызов, когда таймер задержки дошёл до нуля и рука свободна. */
     private void driveScreenUseHold(){
         EntityPlayerSP player=mc.player;if(mc.isGamePaused()||player==null||mc.world==null||player.isHandActive())return;
         if(!clickMethodsResolved)resolveClickMethods();
@@ -1062,7 +1068,7 @@ public class RecordingHandler {
         boolean rmb=manager.getRightClickState();int rmbN=rmb?Math.max(1,manager.getRightClickCount()):0;boolean guiClick=(lmb||rmb||pendingGuiButton==2)&&pendingGuiClick;int guiBtn=guiClick?pendingGuiButton:0;injectChatPrefix();int[] guiKeys=flattenGuiKeys();float guiX=pendingGuiX,guiY=pendingGuiY;String guiScreen=pendingGuiScreen;boolean guiCenter=pendingGuiCenter;int guiCX=pendingGuiCX,guiCY=pendingGuiCY;boolean guiShift=guiClick&&pendingGuiShift;String openScreen=openScreenName();if((openScreen==null||openScreen.isEmpty())&&guiKeys!=null&&guiKeys.length>0)openScreen=pendingGuiKeyScreen;
         // Порядок кликов забираем всегда, даже когда запись кликов выключена: иначе он утечёт в следующие кадры.
         int[] clickOrder=manager.consumeClickSequence();
-        if(idx<=0){keyLog.clear();recRotInit=false;prevChatOpen=mc.currentScreen instanceof net.minecraft.client.gui.GuiChat;pendingKeyMask=0;pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiKeyScreen=null;pendingGuiButton=0;pendingGuiKeys.clear();recDragButton=-1;recDragScreen=null;pendingDropAll=false;}
+        if(idx<=0){recRotInit=false;prevChatOpen=mc.currentScreen instanceof net.minecraft.client.gui.GuiChat;pendingKeyMask=0;pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiKeyScreen=null;pendingGuiButton=0;pendingGuiKeys.clear();recDragButton=-1;recDragScreen=null;pendingDropAll=false;}
         // Окно драга тихо закрылось (сервер, хоткей): неснятый драг дальше не пишется.
         if(recDragScreen!=null){String cur=openScreenName();if(cur==null||!cur.equals(recDragScreen)){recDragButton=-1;recDragScreen=null;}}
         int mask=0;net.minecraft.client.settings.GameSettings gs=mc.gameSettings;
@@ -1097,7 +1103,7 @@ public class RecordingHandler {
         return false;
     }
     /** Мир заморожен (одиночная игра и меню паузы): кадры не пишутся, значит и ввод этих тиков
-     *  нельзя приклеивать к следующему кадру — иначе в записи появляется событие, которого в игровом ��ире не было. */
+     *  нельзя приклеивать к следующему кадру — иначе в записи появляется событие, которого в игровом мире не было. */
     private void clearPendingInput(){
         pendingGuiClick=false;pendingGuiCenter=false;pendingGuiShift=false;pendingGuiScreen=null;pendingGuiKeyScreen=null;pendingGuiButton=0;pendingGuiKeys.clear();
         manager.setLeftClickState(false);manager.setRightClickState(false);manager.clearClickSequence();pendingKeyMask=0;pendingDropAll=false;
@@ -1141,7 +1147,7 @@ public class RecordingHandler {
     private void restorePhysical(KeyBinding key){if(key==null)return;drainPressQueue(key);KeyBinding.setKeyBindState(key.getKeyCode(),physicalDown(key.getKeyCode()));}
     private boolean physicalDown(int code){try{if(code>=0)return Keyboard.isKeyDown(code);int button=code+100;return button>=0&&button<Mouse.getButtonCount()&&Mouse.isButtonDown(button);}catch(Exception e){return false;}}
     @SubscribeEvent public void onWorldUnload(WorldEvent.Unload event){if(event.getWorld().isRemote){releaseBackgroundPolicy();pendingChatMessage=null;forceResetKeys();}}
-    @SubscribeEvent public void onWorldLoad(WorldEvent.Load event){if(event.getWorld().isRemote&&manager.isBusy()){worldResetPending=true;if(manager.isRecording())sendMsg(L("§aНовый мир: запись продолжается.","§aNew world: recording continues.","§aНовий світ: запис триває.","§aNeue Welt: Aufnahme läuft weiter.","§aNowy świat: nagrywanie trwa."));else if(manager.isPlaying())sendMsg(L("§aНовый мир: повтор продо��жается.","§aNew world: playback continues.","§aНовий світ: відтворення триває.","§aNeue Welt: Wiedergabe läuft weiter.","§aNowy świat: odtwarzanie trwa."));}}
+    @SubscribeEvent public void onWorldLoad(WorldEvent.Load event){if(event.getWorld().isRemote&&manager.isBusy()){worldResetPending=true;if(manager.isRecording())sendMsg(L("§aНовый мир: запись продолжается.","§aNew world: recording continues.","§aНовий світ: запис триває.","§aNeue Welt: Aufnahme läuft weiter.","§aNowy świat: nagrywanie trwa."));else if(manager.isPlaying())sendMsg(L("§aНовый мир: повтор продолжается.","§aNew world: playback continues.","§aНовий світ: відтворення триває.","§aNeue Welt: Wiedergabe läuft weiter.","§aNowy świat: odtwarzanie trwa."));}}
     @SubscribeEvent public void onClientChat(ClientChatEvent event){if(manager.isRecording()&&mc.currentScreen instanceof net.minecraft.client.gui.GuiChat){String msg=event.getMessage();if(msg!=null&&!msg.isEmpty())pendingChatMessage=msg;}}
     @SubscribeEvent public void onMouseInput(InputEvent.MouseInputEvent event){
         // Сюда доходят только события без экрана: любой вооружённый драг окна уже протух (окно тихо закрылось).
@@ -1187,7 +1193,7 @@ public class RecordingHandler {
         }
     }
 
-    /** Клавиши в чужих окнах: классифицируем сразу (действие слота, закрытие, печать), чтобы повтор не зависел от текущих привязок ��лавиш. Чат и окна мода не пишем. */
+    /** Клавиши в чужих окнах: классифицируем сразу (действие слота, закрытие, печать), чтобы повтор не зависел от текущих привязок клавиш. Чат и окна мода не пишем. */
     @SubscribeEvent public void onGuiKeyInput(GuiScreenEvent.KeyboardInputEvent.Pre event){
         if(!manager.isRecording()||!Keyboard.getEventKeyState())return;
         GuiScreen screen=event.getGui();if(screen==null||mc.gameSettings==null)return;
@@ -1265,7 +1271,10 @@ public class RecordingHandler {
         // Всё, что нажал игрок, пишем как есть: любая чужая клавиша может быть частью действия.
         if(manager.isRecording()&&config.isRecordAllKeys()){
             try{int code=Keyboard.getEventKey();boolean down=Keyboard.getEventKeyState();
-                if(code>0&&!systemKey(code)&&!ownKey(code)&&keyLog.size()<Frame.MAX_KEY_EVENTS)keyLog.add(new int[]{code,down?1:0});
+                if(code>0&&!systemKey(code)&&!ownKey(code)){
+                    if(keyLog.size()<Frame.MAX_KEY_EVENTS)keyLog.add(new int[]{code,down?1:0});
+                    else MirrorDebug.log("INPUT","key event cap "+Frame.MAX_KEY_EVENTS+" reached in one tick, dropped code "+code);
+                }
             }catch(Exception e){}
         }
         // Bystryj tap klavishi okna ne viden v maske konca tika (klavisha uzhe otpushchena): lovim nazhatie po sobytiju.

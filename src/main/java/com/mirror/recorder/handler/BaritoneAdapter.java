@@ -30,7 +30,7 @@ public final class BaritoneAdapter{
     /** Идёт ли сейчас поиск пути. */
     public static boolean isPathing(Object pathingBehavior){
         try{return pathingBehavior!=null&&mIsPathing!=null&&Boolean.TRUE.equals(mIsPathing.invoke(pathingBehavior));}
-        catch(Throwable ignored){return true;}}
+        catch(Throwable ignored){MirrorDebug.log("BARITONE","isPathing reflection failed: "+ignored);return false;}}
     /** Отмена всех целей и путей. */
     public static void cancelAll(Object pathingBehavior){
         try{if(pathingBehavior!=null&&mCancelEverything!=null)mCancelEverything.invoke(pathingBehavior);}

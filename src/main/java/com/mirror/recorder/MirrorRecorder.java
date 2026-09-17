@@ -31,7 +31,9 @@ public class MirrorRecorder {
         MirrorDebug.setEnabled(config.isDebug());MirrorDebug.setCsvEnabled(config.isDebugCsv());
         MirrorDebug.log("BOOT",MOD_NAME+" "+VERSION+" preInit, config="+e.getSuggestedConfigurationFile().getAbsolutePath());
         // Выход из игры или Alt+F4 посреди записи: незакрытая запись сбрасывается на диск, а не пропадает.
-        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable(){public void run(){try{if(manager!=null)manager.checkpointRecording();}catch(Throwable ignored){}try{if(storage!=null)storage.shutdownFlush();}catch(Throwable ignored){}}},"MirrorRecorder-save"));
+        Runtime.getRuntime().addShutdownHook(new Thread(new Runnable(){public void run(){
+            try{if(manager!=null)manager.checkpointRecording();}catch(Throwable t){MirrorDebug.log("STORAGE","shutdown checkpoint failed: "+t);}
+            try{if(storage!=null)storage.shutdownFlush();}catch(Throwable t){MirrorDebug.log("STORAGE","shutdown flush failed: "+t);}}},"MirrorRecorder-save"));
         // Названия клавиш — translation keys: их переводит игра через
         // assets/mirror_recorder/lang/*.lang, а без lang-файлов — KeybindLocalizer.
         // Категория — литеральное название мода: одинакова во всех языках и не

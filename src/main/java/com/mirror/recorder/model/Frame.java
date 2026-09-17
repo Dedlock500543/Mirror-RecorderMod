@@ -11,9 +11,11 @@ public final class Frame {
     public final int guiButton;public final int[] guiKeys;
     public final long tickIndex;
     public static final int K_ATTACK=1,K_USE=2,K_FORWARD=4,K_BACK=8,K_LEFT=16,K_RIGHT=32,K_JUMP=64,K_SNEAK=128,K_SPRINT=256,K_DROP=512,K_SWAP=1024,K_INVENTORY=2048,K_PICK=4096;
+    /** Мгновенные действия: в кадре это всегда «нажали сейчас», удержания не бывает. */
+    public static final int K_INSTANT=K_DROP|K_SWAP|K_INVENTORY|K_PICK;
     public final int keyMask,hotbarSlot;public final int attackClicks,useClicks;public final float dYaw,dPitch;public final boolean hasKeyMask;
     /** Капы событий одного тика: сами клики и записанный порядок кликов. */
-    public static final int MAX_CLICKS=100,MAX_CLICK_SEQ=200,MAX_KEY_EVENTS=64;
+    public static final int MAX_CLICKS=100,MAX_CLICK_SEQ=200,MAX_KEY_EVENTS=64,MAX_GUI_EVENTS=64,MAX_SCREEN_NAME=160;
     /** Порядок кликов внутри тика: 0 — атака, 1 — использование. Состояние «нажато/не нажато» порядок не хранит,
      *  поэтому он хранится отдельно: два клика в одном тике повторяются той же последовательностью, что записаны.
      *  Пустой массив — записи старого формата, где порядка нет. */
@@ -48,10 +50,16 @@ public final class Frame {
         public Builder dYaw(float v){dYaw=v;return this;} public Builder dPitch(float v){dPitch=v;return this;}
         public Builder guiCenter(boolean has,int x,int y){if(!has)return this;guiCenterX=x;guiCenterY=y;hasGuiCenter=true;return this;}
         public Builder guiShift(boolean v){guiShift=v;return this;}
-        public Builder openScreen(String v){openScreen=v==null||v.isEmpty()?null:v;return this;}
+        public Builder openScreen(String v){if(v==null||v.isEmpty()){openScreen=null;return this;}openScreen=v.length()>MAX_SCREEN_NAME?v.substring(0,MAX_SCREEN_NAME):v;return this;}
         public Builder screenState(boolean v){hasScreenState=v;return this;}
         public Builder guiButton(int v){guiButton=v;return this;}
-        public Builder guiKeys(int[] v){guiKeys=v==null?EMPTY:v;return this;}
+        /** События окна идут блоками по 6 чисел: неполный хвост и перебор капа отбрасываются (импорт чужого .mrr). */
+        public Builder guiKeys(int[] v){
+            if(v==null||v.length<6){guiKeys=EMPTY;return this;}
+            int cap=MAX_GUI_EVENTS*6;int room=v.length<cap?v.length:cap;room-=room%6;
+            if(room<=0){guiKeys=EMPTY;return this;}
+            int[] out=new int[room];System.arraycopy(v,0,out,0,room);guiKeys=out;return this;
+        }
         public Builder dropAll(boolean v){dropAll=v;return this;}
         public Builder worldReset(boolean v){worldReset=v;return this;}
         // Кап кликов за тик: 100, а не 10 — макросы и быстрые кликеры больше не теряют нажатия.

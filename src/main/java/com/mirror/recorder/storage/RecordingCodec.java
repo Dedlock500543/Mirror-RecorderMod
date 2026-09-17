@@ -56,6 +56,8 @@ public class RecordingCodec{
             &&(!f.guiClick||(finite(f.guiX)&&finite(f.guiY)&&f.guiX>=0f&&f.guiX<=1f&&f.guiY>=0f&&f.guiY<=1f
                 &&f.guiScreen!=null&&f.guiScreen.length()>0&&f.guiScreen.length()<=160&&Math.abs(f.guiCenterX)<=16384&&Math.abs(f.guiCenterY)<=16384)))
             &&f.keyEvents!=null&&f.keyEvents.length%2==0&&f.keyEvents.length<=Frame.MAX_KEY_EVENTS*2
+            &&f.guiKeys!=null&&f.guiKeys.length%6==0&&f.guiKeys.length<=Frame.MAX_GUI_EVENTS*6
+            &&(f.openScreen==null||f.openScreen.length()<=Frame.MAX_SCREEN_NAME)
             &&finite(f.curX)&&finite(f.curY)&&Math.abs(f.curX)<=16384f&&Math.abs(f.curY)<=16384f
             &&(!f.hasTarget||(Math.abs(f.tgtX)<=31000000&&Math.abs(f.tgtY)<=31000000&&Math.abs(f.tgtZ)<=31000000
                 &&f.tgtFace>=-1&&f.tgtFace<=5&&finite(f.hitX)&&finite(f.hitY)&&finite(f.hitZ)));}

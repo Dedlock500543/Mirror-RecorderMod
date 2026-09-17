@@ -248,7 +248,7 @@ public class GuiMirrorMain extends GuiScreen{
     }
     @Override protected void keyTyped(char c,int key)throws IOException{
         if(key==Keyboard.KEY_ESCAPE){mc.displayGuiScreen(null);return;}
-        if(key==Keyboard.KEY_F1){mc.displayGuiScreen(new GuiMirrorSettings(manager,config,this,4));return;}
+        if(key==Keyboard.KEY_F1){mc.displayGuiScreen(new GuiMirrorHelp(this,config));return;}
         if(key==Keyboard.KEY_UP){selectSlot(selectedSlot-1);return;}
         if(key==Keyboard.KEY_DOWN){selectSlot(selectedSlot+1);return;}
         if(key==Keyboard.KEY_PRIOR){setScroll(scrollOffset-VISIBLE_SLOTS);return;}
@@ -280,7 +280,10 @@ public class GuiMirrorMain extends GuiScreen{
         mc.displayGuiScreen(this);
         if(!confirmed)return;
         if((returner()!=null&&(returner().isSlotBusy(slot)||returner().isRecoveringSlot(slot)))||!manager.canDeleteSlot(slot)){msg("\u00a7e"+s("Удаление отменено: слот сейчас используется","Deletion cancelled: the slot is in use","Видалення скасовано: слот зараз використовується","Löschen abgebrochen: der Slot wird benutzt","Usuwanie anulowane: slot jest w użyciu"));return;}
-        if(manager.deleteSlot(slot))msg("\u00a7a"+s("Слот "+slot+" удалён · копия лежит в корзине","Slot "+slot+" deleted · a copy is kept in the trash","Слот "+slot+" видалено · копія лежить у кошику","Slot "+slot+" gelöscht · eine Kopie liegt im Papierkorb","Slot "+slot+" usunięty · kopia leży w koszu"));
+        int del=manager.deleteSlotStatus(slot);
+        if(del==com.mirror.recorder.storage.StorageManager.DELETE_TRASHED)msg("\u00a7a"+s("Слот "+slot+" удалён · копия лежит в корзине","Slot "+slot+" deleted · a copy is kept in the trash","Слот "+slot+" видалено · копія лежить у кошику","Slot "+slot+" gelöscht · eine Kopie liegt im Papierkorb","Slot "+slot+" usunięty · kopia leży w koszu"));
+        else if(del==com.mirror.recorder.storage.StorageManager.DELETE_NO_COPY)msg("\u00a7e"+s("Слот "+slot+" удалён · копия не сохранена (файл нечитаем)","Slot "+slot+" deleted · no trash copy (the file was unreadable)","Слот "+slot+" видалено · копію не збережено (файл нечитабельний)","Slot "+slot+" gelöscht · keine Papierkorb-Kopie (Datei unlesbar)","Slot "+slot+" usunięty · brak kopii w koszu (plik nieczytelny)"));
+        else if(del==com.mirror.recorder.storage.StorageManager.DELETE_PARTIAL)msg("\u00a7e"+s("Слот "+slot+" удалён, но часть служебных файлов осталась","Slot "+slot+" deleted, but some service files remain","Слот "+slot+" видалено, але частина службових файлів залишилась","Slot "+slot+" gelöscht, aber einige Hilfsdateien bleiben","Slot "+slot+" usunięty, ale część plików pomocniczych została"));
         else msg("\u00a7c"+s("Не удалось удалить слот. Данные сохранены","Could not delete the slot. Data is intact","Не вдалося видалити слот. Дані збережено","Slot konnte nicht gelöscht werden. Daten sind intakt","Nie udało się usunąć slotu. Dane są nietknięte"));
     }
     public void notifyResult(String text){msg(text);}

@@ -108,9 +108,6 @@ public final class MirrorDebug {
         }
     }
 
-    public static boolean isCsvEnabled() {
-        return csvEnabled;
-    }
 
     /** True when -Dmirror.debug=true pins diagnostics on; the settings toggle cannot turn them off. */
     public static boolean isForced() {
@@ -131,14 +128,6 @@ public final class MirrorDebug {
         }
         write(tag, message);
         LOG.info("[{}] {}", tag, message);
-    }
-
-    /** Writes one line to the trace file only. Used for high frequency data. */
-    public static void trace(String tag, String message) {
-        if (!enabled) {
-            return;
-        }
-        write(tag, message);
     }
 
     /** Writes at most one line per interval for the given key. */
@@ -304,7 +293,10 @@ public final class MirrorDebug {
                 if (old.isFile()) {
                     old.delete();
                 }
-                file.renameTo(old);
+                try{java.nio.file.Files.move(file.toPath(),old.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                }catch(Exception atomicUnsupported){
+                    try{java.nio.file.Files.move(file.toPath(),old.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }catch(Exception replaceFailed){if(!file.renameTo(old))LOG.warn("Mirror Recorder: cannot rotate debug log");}}
             }
             writer = new PrintWriter(new FileWriter(file, true));
             writer.println();

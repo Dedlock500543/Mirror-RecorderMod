@@ -14,23 +14,19 @@ public class TrashStore{
     private final Map<String,TrashSummary> trashSummaries=new HashMap<String,TrashSummary>();
     public TrashStore(File saveDir,File trashDir){this.saveDir=saveDir;this.trashDir=trashDir;loadSessionTrash();}
     public File getTrashDir(){return trashDir;}
-    /** Перемещение записи в корзину из readStructuralRoot. */
-    public boolean moveToTrash(int slot,NBTTagCompound r){
-        r.setInteger("TrashSlot",slot);r.setLong("TrashedAt",System.currentTimeMillis());
-        String stamp=new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.ROOT).format(new Date());
-        File out=new File(trashDir,"slot-"+slot+"-"+stamp+".mrr");int suffix=2;
-        while(out.exists())out=new File(trashDir,"slot-"+slot+"-"+stamp+"-"+(suffix++)+".mrr");
-        try(FileOutputStream fos=new FileOutputStream(out)){CompressedStreamTools.writeCompressed(r,fos);}
-        catch(Exception e){LOG.error("Trash copy failed for slot {}",slot,e);return false;}
-        sessionTrash.add(out.getName());saveSessionTrash();MirrorDebug.log("TRASH","slot "+slot+" copied to "+out.getName());trimTrash();return true;}
+    /** Обрезка корзины до лимита: вызывается после каждой успешной архивации. */
+    private void trimAfterArchive(){trimTrash();}
     /** Архивация лучшей копии в корзину. */
     public boolean archiveToTrash(int slot,NBTTagCompound best){
         File out=new File(trashDir,"slot-"+slot+"-"+new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.ROOT).format(new Date())+".mrr");int suffix=2;
         while(out.exists())out=new File(trashDir,"slot-"+slot+"-"+new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.ROOT).format(new Date())+"-"+(suffix++)+".mrr");
         try(FileOutputStream fos=new FileOutputStream(out)){
             best.setInteger("TrashSlot",slot);best.setLong("TrashedAt",System.currentTimeMillis());
-            CompressedStreamTools.writeCompressed(best,fos);sessionTrash.add(out.getName());saveSessionTrash();return true;
-        }catch(Exception e){LOG.error("Trash copy failed for slot {}",slot,e);return false;}}
+            CompressedStreamTools.writeCompressed(best,fos);
+        }catch(Exception e){LOG.error("Trash copy failed for slot {}",slot,e);return false;}
+        // Запись файла закрыта: состояние сессии и обрезка — уже вне try-with-resources.
+        sessionTrash.add(out.getName());saveSessionTrash();trimAfterArchive();
+        MirrorDebug.log("TRASH","slot "+slot+" archived to "+out.getName());return true;}
     public List<String> listTrashFiles(){
         File[] files=trashDir.listFiles(new FilenameFilter(){public boolean accept(File d,String n){return n.toLowerCase(Locale.ROOT).endsWith(".mrr");}});
         List<File> all=new ArrayList<File>();if(files!=null)Collections.addAll(all,files);
@@ -71,7 +67,14 @@ public class TrashStore{
     private void trimTrash(){List<String> all=listTrashFiles();for(int i=MAX_TRASH;i<all.size();i++){File f=trashFile(all.get(i));if(f!=null&&f.isFile()&&f.delete())forgetTrash(f.getName());}}
     private File sessionStateFile(){return new File(saveDir,".trash_session");}
     private void loadSessionTrash(){File sf=sessionStateFile();if(!sf.isFile())return;try(BufferedReader r=new BufferedReader(new InputStreamReader(new FileInputStream(sf),"UTF-8"))){String line;while((line=r.readLine())!=null){String t=line.trim();if(!t.isEmpty())sessionTrash.add(t);}}catch(Exception e){LOG.error("Failed to load session trash state",e);}}
-    private void saveSessionTrash(){File target=sessionStateFile();File tmp=new File(target.getParentFile(),target.getName()+".tmp");try(BufferedWriter w=new BufferedWriter(new OutputStreamWriter(new FileOutputStream(tmp),"UTF-8"))){for(String name:sessionTrash){w.write(name);w.newLine();}w.flush();}catch(Exception e){LOG.error("Failed to save session trash state",e);tmp.delete();return;}if(target.exists()&&!target.delete()){LOG.error("Failed to delete old session state file");tmp.delete();return;}if(!tmp.renameTo(target)){LOG.error("Failed to rename session state tmp file");tmp.delete();}}
+    private void saveSessionTrash(){File target=sessionStateFile();File tmp=new File(target.getParentFile(),target.getName()+".tmp");try(BufferedWriter w=new BufferedWriter(new OutputStreamWriter(new FileOutputStream(tmp),"UTF-8"))){for(String name:sessionTrash){w.write(name);w.newLine();}w.flush();}catch(Exception e){LOG.error("Failed to save session trash state",e);tmp.delete();return;}if(!moveFile(tmp,target)){LOG.error("Failed to replace session state file");tmp.delete();}}
+    /** Сначала атомарный перенос, затем обычный с заменой, и только потом renameTo. */
+    private static boolean moveFile(File from,File to){
+        if(from==null||to==null||!from.isFile())return false;
+        try{java.nio.file.Files.move(from.toPath(),to.toPath(),java.nio.file.StandardCopyOption.ATOMIC_MOVE);return true;
+        }catch(Exception atomicUnsupported){
+            try{java.nio.file.Files.move(from.toPath(),to.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);return true;
+            }catch(Exception replaceFailed){return from.renameTo(to);}}}
     public static final class TrashSummary{final long stamp,size,trashedAt;final int slot,frames;final String title;
         TrashSummary(long stamp,long size,int slot,int frames,long trashedAt,String title){this.stamp=stamp;this.size=size;this.slot=slot;this.frames=frames;this.trashedAt=trashedAt;this.title=title;}
         boolean matches(long s,long z){return stamp==s&&size==z;}}
