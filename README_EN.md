@@ -3,12 +3,6 @@
 **Mirror Recorder** is a client-side mod for **Minecraft 1.12.2 / Forge** that records player input and plays it back later.
 
 > 🎥 The mod replays **actual player input** instead of directly simulating movement or physics. This keeps playback tied to Minecraft's normal game mechanics.
-
-**GitHub:** https://github.com/Dedlock500543/Mirror-RecorderMod
-**Download project (ZIP):** https://github.com/Dedlock500543/Mirror-RecorderMod/archive/refs/heads/main.zip
-
-GitHub saves the archive as `Mirror-RecorderMod-main.zip`. After extraction, the project folder is named `Mirror-RecorderMod-main`.
-
 **Русская версия:** [`README.md`](README.md)
 
 ---
