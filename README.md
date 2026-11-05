@@ -4,7 +4,7 @@
 
 > 🎥 The mod replays **actual player input** instead of directly simulating movement or physics. This keeps playback tied to Minecraft's normal game mechanics.
 
-**Русская версия:** [`README.md`](README.md)
+**Русская версия:** [`README_RU.md`](README_RU.md)
 --
 
 ## ✨ Features
